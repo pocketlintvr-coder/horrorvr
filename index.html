@@ -263,8 +263,8 @@
       for (let i = 0; i < pos.count; i++) {
         const localX = pos.getX(i);
         const localZ = pos.getZ(i);
-        const worldX = worldOffsetX + localX;
-        const worldZ = worldOffsetZ + localZ;
+        const worldX = worldOffsetX + localX + CHUNK_SIZE / 2;
+        const worldZ = worldOffsetZ + localZ + CHUNK_SIZE / 2;
         pos.setY(i, getTerrainHeight(worldX, worldZ));
       }
       geo.computeVertexNormals();
