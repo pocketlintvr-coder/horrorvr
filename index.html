@@ -39,11 +39,16 @@
     let scene, camera, renderer, flashlight;
     let monster, cameraGroup;
     
-    // VR Controllers & Locomotion Setup
+    // VR Controllers & Physics
     let controller1, controller2;
-    const prevControllerPos = [new THREE.Vector3(), new THREE.Vector3()];
-    const controllerPos = [new THREE.Vector3(), new THREE.Vector3()];
-    const handRadius = 0.15; // Arm reach collision floor height
+    const prevPos1 = new THREE.Vector3();
+    const prevPos2 = new THREE.Vector3();
+    const currentPos1 = new THREE.Vector3();
+    const currentPos2 = new THREE.Vector3();
+    
+    let playerVelocityY = 0;
+    const gravity = -0.005;
+    const floorY = 0;
 
     init();
 
@@ -52,7 +57,6 @@
       scene.background = new THREE.Color(0x020202);
       scene.fog = new THREE.FogExp2(0x020202, 0.15);
 
-      // Camera Group for physics movement
       cameraGroup = new THREE.Group();
       scene.add(cameraGroup);
 
@@ -75,11 +79,8 @@
       flashlight.target = lightTarget;
       camera.add(flashlight);
 
-      // World Environment & Monster
       createEnvironment();
       createMonster();
-
-      // Controller Setup for Gorilla Tag Movement
       setupControllers();
 
       setupVR();
@@ -94,49 +95,65 @@
       cameraGroup.add(controller1);
       cameraGroup.add(controller2);
 
-      // Visual Hand Representation (Simple spheres)
-      const handGeo = new THREE.SphereGeometry(handRadius, 8, 8);
-      const handMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.5 });
+      // Visible Hand Spheres
+      const handGeo = new THREE.SphereGeometry(0.12, 16, 16);
+      const handMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.3 });
 
       controller1.add(new THREE.Mesh(handGeo, handMat));
       controller2.add(new THREE.Mesh(handGeo, handMat));
     }
 
-    function updateGorillaMovement() {
-      const controllers = [controller1, controller2];
+    function handleGorillaPhysics() {
+      const controllers = [
+        { obj: controller1, prev: prevPos1, curr: currentPos1 },
+        { obj: controller2, prev: prevPos2, curr: currentPos2 }
+      ];
 
-      controllers.forEach((controller, idx) => {
-        if (!controller) return;
+      let isTouchingGround = false;
 
-        // Get world position of controller
-        controller.getWorldPosition(controllerPos[idx]);
+      controllers.forEach((c) => {
+        if (!c.obj) return;
 
-        // Check if hand touches or penetrates the floor plane (Y = 0)
-        if (controllerPos[idx].y <= handRadius) {
-          // Calculate movement delta relative to frame
-          const delta = new THREE.Vector3().subVectors(prevControllerPos[idx], controllerPos[idx]);
-          
-          // Apply opposite impulse force to the camera rig
-          cameraGroup.position.x += delta.x * 1.5;
-          cameraGroup.position.z += delta.z * 1.5;
+        c.obj.getWorldPosition(c.curr);
 
-          // Vertical push-off height boost
+        // Calculate arm movement delta
+        const delta = new THREE.Vector3().subVectors(c.prev, c.curr);
+
+        // Check if controller hand touches or goes below ground floor (Y = 0)
+        if (c.curr.y <= 0.15) {
+          isTouchingGround = true;
+
+          // Push player in opposite direction of hand drag (Gorilla Tag physics)
+          cameraGroup.position.x += delta.x * 2.0;
+          cameraGroup.position.z += delta.z * 2.0;
+
+          // Push upward if slapping down on ground
           if (delta.y > 0) {
-            cameraGroup.position.y += delta.y * 1.2;
+            playerVelocityY = delta.y * 1.5;
           }
         }
 
-        // Apply basic floor gravity pull if airborne
-        if (cameraGroup.position.y > 0) {
-          cameraGroup.position.y = Math.max(0, cameraGroup.position.y - 0.015);
-        }
-
-        prevControllerPos[idx].copy(controllerPos[idx]);
+        c.prev.copy(c.curr);
       });
+
+      // Apply Gravity when airborne
+      if (!isTouchingGround && cameraGroup.position.y > floorY) {
+        playerVelocityY += gravity;
+        cameraGroup.position.y += playerVelocityY;
+
+        // Snap back to floor baseline
+        if (cameraGroup.position.y < floorY) {
+          cameraGroup.position.y = floorY;
+          playerVelocityY = 0;
+        }
+      } else if (isTouchingGround) {
+        // Stop falling when touching floor
+        if (playerVelocityY < 0) playerVelocityY = 0;
+      }
     }
 
     function createEnvironment() {
-      const floorGeo = new THREE.PlaneGeometry(20, 100);
+      const floorGeo = new THREE.PlaneGeometry(30, 100);
       const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
       const floor = new THREE.Mesh(floorGeo, floorMat);
       floor.rotation.x = -Math.PI / 2;
@@ -150,12 +167,12 @@
       const wallMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
       
       const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(100, 5), wallMat);
-      leftWall.position.set(-10, 2.5, 0);
+      leftWall.position.set(-15, 2.5, 0);
       leftWall.rotation.y = Math.PI / 2;
       scene.add(leftWall);
 
       const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(100, 5), wallMat);
-      rightWall.position.set(10, 2.5, 0);
+      rightWall.position.set(15, 2.5, 0);
       rightWall.rotation.y = -Math.PI / 2;
       scene.add(rightWall);
     }
@@ -201,7 +218,7 @@
             button.textContent = 'ENTER VR';
             button.addEventListener('click', onEnterVR);
           } else {
-            button.textContent = 'VR NOT SUPPORTED ON THIS DEVICE';
+            button.textContent = 'VR NOT SUPPORTED';
             button.disabled = true;
           }
         });
@@ -226,8 +243,7 @@
     }
 
     function render(time) {
-      // Process Arm/Gorilla Locomotion each frame
-      updateGorillaMovement();
+      handleGorillaPhysics();
 
       if (flashlight) {
         flashlight.intensity = 1.8 + Math.sin(time * 0.02) * 0.3 + (Math.random() < 0.05 ? -0.8 : 0);
