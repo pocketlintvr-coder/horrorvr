@@ -62,7 +62,7 @@
 <body>
 
   <button id="vr-button">ENTER VR EXPERIENCE</button>
-  <div id="objective-ui">OBJECTIVE: Escape the Backrooms maze by finding the Glowing Exit Door!</div>
+  <div id="objective-ui">OBJECTIVE: Collect 3 Tapes (0/3) to unlock the Exit Door!</div>
   <div id="jumpscare-overlay"></div>
 
   <script>
@@ -70,9 +70,14 @@
     let flashlight, ambientLight, flickeringLight;
     let monster;
     let exitDoor;
-    let vrObjectiveMesh;
+    let vrObjectiveMesh, vrCanvas, vrCtx;
     let wallColliders = [];
     let audioCtx = null;
+
+    // Tapes objective tracking
+    let tapes = [];
+    let collectedTapes = 0;
+    const TOTAL_TAPES = 3;
 
     // Controllers & Motion Tracking
     let controller1, controller2;
@@ -83,26 +88,32 @@
 
     // Movement & Difficulty Tuning
     const BASE_MOVE_SPEED = 0.06;
-    const MONSTER_SPEED = 0.045;
+    const MONSTER_SPEED = 0.048;
     const JUMPSCARE_DISTANCE = 1.2;
     const SNAP_ANGLE = Math.PI / 4;
     let canSnapTurn = true;
     let isJumpscaring = false;
     let hasEscaped = false;
 
-    // 0 = Empty, 1 = Wall, 2 = Exit Door
+    // 0 = Empty, 1 = Wall, 2 = Exit Door, 3 = Cassette Tape
     const mazeGrid = [
-      [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-      [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1],
-      [1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1],
-      [1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1],
-      [1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1],
-      [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1],
-      [1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1],
-      [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1],
-      [1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1],
-      [1, 0, 1, 0, 0, 0, 0, 0, 0, 2, 1],
-      [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+      [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+      [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 3, 0, 1],
+      [1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1],
+      [1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+      [1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1],
+      [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1],
+      [1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1],
+      [1, 0, 0, 0, 1, 0, 0, 0, 3, 0, 1, 0, 0, 0, 1, 0, 1],
+      [1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1],
+      [1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+      [1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1],
+      [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1],
+      [1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1],
+      [1, 3, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1],
+      [1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1],
+      [1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1],
+      [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
     ];
     const CELL_SIZE = 4;
 
@@ -132,7 +143,7 @@
       scene.add(ambientLight);
 
       flickeringLight = new THREE.PointLight(0xffea88, 2.0, 20);
-      flickeringLight.position.set(5 * CELL_SIZE, 3.2, 5 * CELL_SIZE);
+      flickeringLight.position.set(8 * CELL_SIZE, 3.2, 8 * CELL_SIZE);
       scene.add(flickeringLight);
 
       flashlight = new THREE.SpotLight(0xfffbe6, 5, 22, Math.PI / 5, 0.4, 1);
@@ -153,27 +164,53 @@
     }
 
     function createVrObjectiveText() {
-      const canvas = document.createElement('canvas');
-      canvas.width = 512;
-      canvas.height = 128;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      ctx.fillRect(0, 0, 512, 128);
-      ctx.strokeStyle = '#ffff00';
-      ctx.lineWidth = 4;
-      ctx.strokeRect(4, 4, 504, 120);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '22px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('OBJECTIVE: Escape the Maze!', 256, 50);
-      ctx.fillText('Find the Glowing Red Exit Door', 256, 85);
+      vrCanvas = document.createElement('canvas');
+      vrCanvas.width = 512;
+      vrCanvas.height = 128;
+      vrCtx = vrCanvas.getContext('2d');
 
-      const texture = new THREE.CanvasTexture(canvas);
+      updateVrObjectiveUI();
+
+      const texture = new THREE.CanvasTexture(vrCanvas);
       const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
       const geo = new THREE.PlaneGeometry(1.2, 0.3);
       vrObjectiveMesh = new THREE.Mesh(geo, mat);
       vrObjectiveMesh.position.set(0, 0.5, -1.5);
       camera.add(vrObjectiveMesh);
+    }
+
+    function updateVrObjectiveUI() {
+      if (!vrCtx) return;
+      vrCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      vrCtx.fillRect(0, 0, 512, 128);
+      vrCtx.strokeStyle = collectedTapes === TOTAL_TAPES ? '#00ff00' : '#ffff00';
+      vrCtx.lineWidth = 4;
+      vrCtx.strokeRect(4, 4, 504, 120);
+      vrCtx.fillStyle = '#ffffff';
+      vrCtx.font = '22px sans-serif';
+      vrCtx.textAlign = 'center';
+
+      if (collectedTapes < TOTAL_TAPES) {
+        vrCtx.fillText(`Collect Tapes: ${collectedTapes}/${TOTAL_TAPES}`, 256, 50);
+        vrCtx.fillText('Find hidden tapes to unlock Exit!', 256, 85);
+      } else {
+        vrCtx.fillStyle = '#00ff00';
+        vrCtx.fillText('Exit Door Unlocked!', 256, 50);
+        vrCtx.fillText('Head to the Glowing Red Door', 256, 85);
+      }
+
+      if (vrObjectiveMesh) {
+        vrObjectiveMesh.material.map.needsUpdate = true;
+      }
+
+      const ui = document.getElementById('objective-ui');
+      if (collectedTapes < TOTAL_TAPES) {
+        ui.innerText = `OBJECTIVE: Collect 3 Tapes (${collectedTapes}/${TOTAL_TAPES}) to unlock the Exit Door!`;
+        ui.style.color = '#ffffdd';
+      } else {
+        ui.innerText = 'OBJECTIVE: Exit Unlocked! Head to the Glowing Red Door to escape!';
+        ui.style.color = '#00ff00';
+      }
     }
 
     function resetPlayerPosition() {
@@ -184,7 +221,7 @@
     function resetMonsterPosition() {
       if (monster) {
         monster.scale.set(2.2, 2.8, 1);
-        monster.position.set(8 * CELL_SIZE, 1.4, 8 * CELL_SIZE);
+        monster.position.set(15 * CELL_SIZE, 1.4, 1 * CELL_SIZE);
       }
     }
 
@@ -222,10 +259,8 @@
       const overlay = document.getElementById('jumpscare-overlay');
       overlay.style.display = 'block';
 
-      // Downscale monster so it fits nicely on screen
       monster.scale.set(1.2, 1.5, 1);
 
-      // Place monster directly in front of camera view at eye height (y offset applied relative to player camera)
       const viewDir = new THREE.Vector3();
       camera.getWorldDirection(viewDir);
       
@@ -233,7 +268,7 @@
       camera.getWorldPosition(headPos);
 
       monster.position.copy(headPos).addScaledVector(viewDir, 1.0);
-      monster.position.y = headPos.y - 0.2; // Aligned directly with eye level
+      monster.position.y = headPos.y - 0.2;
 
       let shakeFrames = 0;
       const shakeInterval = setInterval(() => {
@@ -260,11 +295,17 @@
       ui.style.color = "#00ff00";
 
       alert("YOU ESCAPED THE BACKROOMS!");
+      
+      // Reset game progression
+      collectedTapes = 0;
+      tapes.forEach(tape => {
+        tape.visible = true;
+      });
+      updateVrObjectiveUI();
+
       resetPlayerPosition();
       resetMonsterPosition();
       hasEscaped = false;
-      ui.innerText = "OBJECTIVE: Escape the Backrooms maze by finding the Glowing Exit Door!";
-      ui.style.color = "#ffffdd";
     }
 
     function buildMaze() {
@@ -273,7 +314,7 @@
       const floorTexture = textureLoader.load('https://i.postimg.cc/d0GDW4qv/backrooms-textures-map-result-image-v0-cn40k99826b91.webp');
       floorTexture.wrapS = THREE.RepeatWrapping;
       floorTexture.wrapT = THREE.RepeatWrapping;
-      floorTexture.repeat.set(11 * 2, 11 * 2);
+      floorTexture.repeat.set(17 * 2, 17 * 2);
 
       const wallTexture = textureLoader.load('https://i.postimg.cc/MpMnBzNM/hey-i-have-a-question-for-you-all-why-are-the-walls-in-the-v0-uc5walc8c3df1.webp');
       wallTexture.wrapS = THREE.RepeatWrapping;
@@ -301,6 +342,9 @@
       const wallGeo = new THREE.BoxGeometry(CELL_SIZE, 3.5, CELL_SIZE);
       const wallMat = new THREE.MeshStandardMaterial({ map: wallTexture, roughness: 0.7 });
 
+      const tapeGeo = new THREE.BoxGeometry(0.5, 0.15, 0.8);
+      const tapeMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.3, emissive: 0x333300 });
+
       for (let r = 0; r < mazeGrid.length; r++) {
         for (let c = 0; c < mazeGrid[r].length; c++) {
           if (mazeGrid[r][c] === 1) {
@@ -309,7 +353,7 @@
             scene.add(wall);
             wallColliders.push(new THREE.Box3().setFromObject(wall));
           } else if (mazeGrid[r][c] === 2) {
-            // Exit Door Objective
+            // Exit Door
             const doorGeo = new THREE.BoxGeometry(CELL_SIZE * 0.8, 3.2, 0.4);
             const doorMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xaa0000 });
             exitDoor = new THREE.Mesh(doorGeo, doorMat);
@@ -319,6 +363,16 @@
             const exitLight = new THREE.PointLight(0xff0000, 3, 8);
             exitLight.position.set(c * CELL_SIZE, 2.0, r * CELL_SIZE);
             scene.add(exitLight);
+          } else if (mazeGrid[r][c] === 3) {
+            // Cassette Tape Collectible
+            const tape = new THREE.Mesh(tapeGeo, tapeMat);
+            tape.position.set(c * CELL_SIZE, 0.8, r * CELL_SIZE);
+            scene.add(tape);
+            tapes.push(tape);
+
+            const tapeLight = new THREE.PointLight(0xffff00, 1.5, 4);
+            tapeLight.position.set(c * CELL_SIZE, 1.2, r * CELL_SIZE);
+            scene.add(tapeLight);
           }
         }
       }
@@ -366,7 +420,6 @@
 
       const currentSwingVelocity = dist1 + dist2;
 
-      // Accelerate move speed when swinging arms
       if (currentSwingVelocity > 0.02) {
         armSwingSpeedBoost = Math.min(0.08, armSwingSpeedBoost + currentSwingVelocity * 0.8);
       } else {
@@ -397,7 +450,6 @@
           continue;
         }
 
-        // Movement with arm-swing boost
         if (source.handedness === 'left') {
           const currentSpeed = BASE_MOVE_SPEED + armSwingSpeedBoost;
 
@@ -414,10 +466,21 @@
 
           const nextPos = cameraGroup.position.clone().add(moveVec);
 
-          // Check Exit Door Objective reach
+          // Tape Collection Check
+          tapes.forEach(tape => {
+            if (tape.visible && nextPos.distanceTo(tape.position) < 1.5) {
+              tape.visible = false;
+              collectedTapes++;
+              updateVrObjectiveUI();
+            }
+          });
+
+          // Check Exit Door Objective Reach
           if (exitDoor && nextPos.distanceTo(exitDoor.position) < 1.8) {
-            triggerEscapeWin();
-            return;
+            if (collectedTapes >= TOTAL_TAPES) {
+              triggerEscapeWin();
+              return;
+            }
           }
 
           // Wall collision check
@@ -440,7 +503,6 @@
           }
         }
 
-        // Snap turning
         if (source.handedness === 'right') {
           if (canSnapTurn && Math.abs(xAxis) > 0.6) {
             cameraGroup.rotation.y -= Math.sign(xAxis) * SNAP_ANGLE;
@@ -480,6 +542,13 @@
     function render(timestamp) {
       processThumbstickLocomotion();
 
+      // Rotate active tapes
+      tapes.forEach(tape => {
+        if (tape.visible) {
+          tape.rotation.y += 0.03;
+        }
+      });
+
       if (flickeringLight) {
         flickeringLight.intensity = 1.0 + Math.sin(timestamp * 0.015) * 0.8 + (Math.random() < 0.08 ? -1.2 : 0);
       }
@@ -494,7 +563,6 @@
         } else {
           dir.normalize();
           monster.position.addScaledVector(dir, MONSTER_SPEED);
-          // Keep monster baseline height visually grounded above floor
           monster.position.y = 1.4;
         }
       }
