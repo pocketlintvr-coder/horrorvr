@@ -3,62 +3,67 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VR Horror Experience</title>
+  <title>Gorilla Tag Horror Experience</title>
   <style>
     body {
       margin: 0;
       overflow: hidden;
       background-color: #000;
-      font-family: sans-serif;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
     #vr-button {
       position: absolute;
-      bottom: 20px;
+      bottom: 30px;
       left: 50%;
       transform: translateX(-50%);
-      padding: 16px 32px;
-      background: #8b0000;
-      color: #fff;
-      border: 2px solid #ff0000;
-      font-size: 18px;
+      padding: 18px 36px;
+      background: linear-gradient(135deg, #8b0000 0%, #4a0000 100%);
+      color: #ffffff;
+      border: 2px solid #ff3333;
+      font-size: 20px;
       font-weight: bold;
+      letter-spacing: 1px;
       cursor: pointer;
       z-index: 999;
-      border-radius: 6px;
+      border-radius: 8px;
+      box-shadow: 0 0 15px rgba(255, 0, 0, 0.4);
+      transition: all 0.2s ease-in-out;
     }
-    #vr-button:hover { background: #ff0000; }
+    #vr-button:hover {
+      background: linear-gradient(135deg, #ff0000 0%, #8b0000 100%);
+      box-shadow: 0 0 25px rgba(255, 0, 0, 0.8);
+      scale: 1.05;
+    }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
-  <button id="vr-button">ENTER VR</button>
+  <button id="vr-button">ENTER VR HORROR</button>
 
   <script>
-    let scene, camera, renderer, flashlight, ambientLight;
-    let monster, cameraGroup;
-    
+    let scene, camera, renderer, cameraGroup;
+    let flashlight, ambientLight, flickeringLight;
+    let monster;
+
+    // Controllers & Gorilla Movement Variables
     let controller1, controller2;
     let grip1, grip2;
-    
-    const prevHandPos1 = new THREE.Vector3();
-    const prevHandPos2 = new THREE.Vector3();
-    const currHandPos1 = new THREE.Vector3();
-    const currHandPos2 = new THREE.Vector3();
+    const handPrevPos1 = new THREE.Vector3();
+    const handPrevPos2 = new THREE.Vector3();
+    const handCurrPos1 = new THREE.Vector3();
+    const handCurrPos2 = new THREE.Vector3();
 
     let playerVelocityY = 0;
-    const gravity = -0.005;
-
-    // Safety limits for movement
-    const MAX_SWING_SPEED = 0.25;
-    const MAX_JUMP_FORCE = 0.12;
+    const gravity = -0.006;
 
     init();
 
     function init() {
+      // 1. Scene & Atmosphere Setup
       scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x111118);
-      scene.fog = new THREE.FogExp2(0x111118, 0.05);
+      scene.background = new THREE.Color(0x050508);
+      scene.fog = new THREE.FogExp2(0x050508, 0.08); // Dense realistic fog
 
       cameraGroup = new THREE.Group();
       scene.add(cameraGroup);
@@ -66,32 +71,171 @@
       camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
       cameraGroup.add(camera);
 
-      renderer = new THREE.WebGLRenderer({ antialias: true });
+      // 2. High Quality Renderer Setup
+      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
-      ambientLight = new THREE.AmbientLight(0x404050, 1.5);
+      // 3. High Quality Lighting
+      ambientLight = new THREE.AmbientLight(0x1a1a24, 0.8);
       scene.add(ambientLight);
 
-      const ceilingLight = new THREE.PointLight(0xffffff, 1.5, 30);
-      ceilingLight.position.set(0, 4, -10);
-      scene.add(ceilingLight);
+      // Flickering overhead corridor light
+      flickeringLight = new THREE.PointLight(0xffaa55, 2.5, 18);
+      flickeringLight.position.set(0, 3.8, -10);
+      flickeringLight.castShadow = true;
+      scene.add(flickeringLight);
 
-      flashlight = new THREE.SpotLight(0xffffff, 4, 35, Math.PI / 4, 0.5, 1);
+      // Player Flashlight attached to VR headset
+      flashlight = new THREE.SpotLight(0xfff5ea, 5, 25, Math.PI / 5, 0.4, 1);
+      flashlight.castShadow = true;
+      flashlight.shadow.mapSize.width = 1024;
+      flashlight.shadow.mapSize.height = 1024;
       const lightTarget = new THREE.Object3D();
       lightTarget.position.set(0, 0, -5);
       camera.add(lightTarget);
       flashlight.target = lightTarget;
       camera.add(flashlight);
 
-      createEnvironment();
-      createMonster();
+      // 4. Procedural Textures & Environment Construction
+      createHighQualityEnvironment();
+      createHighQualityMonster();
       setupControllers();
 
+      // 5. Handlers
       document.getElementById('vr-button').addEventListener('click', onEnterVR);
       window.addEventListener('resize', onWindowResize);
+
+      // 6. XR Animation Loop
       renderer.setAnimationLoop(render);
+    }
+
+    // Procedural Texture Generators for High-Detail Visuals
+    function generateCanvasTexture(type) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+
+      if (type === 'brick') {
+        ctx.fillStyle = '#222225';
+        ctx.fillRect(0, 0, 512, 512);
+        ctx.fillStyle = '#111113';
+        for (let y = 0; y < 512; y += 32) {
+          const offset = (y / 32) % 2 === 0 ? 0 : 32;
+          for (let x = -32; x < 512; x += 64) {
+            ctx.fillRect(x + offset + 2, y + 2, 60, 28);
+          }
+        }
+      } else if (type === 'wood') {
+        ctx.fillStyle = '#1c1512';
+        ctx.fillRect(0, 0, 512, 512);
+        ctx.fillStyle = '#120d0a';
+        for (let i = 0; i < 512; i += 64) {
+          ctx.fillRect(i, 0, 4, 512);
+        }
+      }
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    function createHighQualityEnvironment() {
+      const brickTexture = generateCanvasTexture('brick');
+      brickTexture.wrapS = THREE.RepeatWrapping;
+      brickTexture.wrapT = THREE.RepeatWrapping;
+      brickTexture.repeat.set(10, 2);
+
+      const woodTexture = generateCanvasTexture('wood');
+      woodTexture.wrapS = THREE.RepeatWrapping;
+      woodTexture.wrapT = THREE.RepeatWrapping;
+      woodTexture.repeat.set(4, 20);
+
+      // Detailed Wooden Floor
+      const floorGeo = new THREE.PlaneGeometry(12, 80);
+      const floorMat = new THREE.MeshStandardMaterial({
+        map: woodTexture,
+        roughness: 0.4,
+        metalness: 0.1
+      });
+      const floor = new THREE.Mesh(floorGeo, floorMat);
+      floor.rotation.x = -Math.PI / 2;
+      floor.receiveShadow = true;
+      scene.add(floor);
+
+      // Ceiling
+      const ceiling = floor.clone();
+      ceiling.position.y = 4.5;
+      ceiling.rotation.x = Math.PI / 2;
+      scene.add(ceiling);
+
+      // Ceiling Beams for detail
+      const beamGeo = new THREE.BoxGeometry(12, 0.3, 0.4);
+      const beamMat = new THREE.MeshStandardMaterial({ color: 0x0a0705, roughness: 0.9 });
+      for (let z = -35; z <= 10; z += 6) {
+        const beam = new THREE.Mesh(beamGeo, beamMat);
+        beam.position.set(0, 4.35, z);
+        beam.castShadow = true;
+        scene.add(beam);
+      }
+
+      // Brick Walls
+      const wallMat = new THREE.MeshStandardMaterial({
+        map: brickTexture,
+        roughness: 0.8
+      });
+
+      const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(80, 4.5), wallMat);
+      leftWall.position.set(-6, 2.25, -12.5);
+      leftWall.rotation.y = Math.PI / 2;
+      leftWall.receiveShadow = true;
+      scene.add(leftWall);
+
+      const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(80, 4.5), wallMat);
+      rightWall.position.set(6, 2.25, -12.5);
+      rightWall.rotation.y = -Math.PI / 2;
+      rightWall.receiveShadow = true;
+      scene.add(rightWall);
+    }
+
+    function createHighQualityMonster() {
+      const monsterGroup = new THREE.Group();
+
+      // Slender shadowy torso
+      const bodyGeo = new THREE.CylinderGeometry(0.35, 0.15, 3.2, 12);
+      const monsterMat = new THREE.MeshStandardMaterial({
+        color: 0x08080a,
+        roughness: 0.9
+      });
+      const body = new THREE.Mesh(bodyGeo, monsterMat);
+      body.position.y = 1.6;
+      body.castShadow = true;
+      monsterGroup.add(body);
+
+      // Creepy Head
+      const headGeo = new THREE.SphereGeometry(0.28, 16, 16);
+      const head = new THREE.Mesh(headGeo, monsterMat);
+      head.position.y = 3.2;
+      monsterGroup.add(head);
+
+      // Glowing Red Piercing Eyes
+      const eyeGeo = new THREE.SphereGeometry(0.04, 12, 12);
+      const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+
+      const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+      leftEye.position.set(-0.1, 3.25, 0.22);
+
+      const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+      rightEye.position.set(0.1, 3.25, 0.22);
+
+      monsterGroup.add(leftEye);
+      monsterGroup.add(rightEye);
+
+      monsterGroup.position.set(0, 0, -28);
+      scene.add(monsterGroup);
+      monster = monsterGroup;
     }
 
     function setupControllers() {
@@ -103,9 +247,13 @@
       grip1 = renderer.xr.getControllerGrip(0);
       grip2 = renderer.xr.getControllerGrip(1);
 
-      // Gorilla Tag hand spheres
-      const handGeo = new THREE.SphereGeometry(0.18, 16, 16);
-      const handMat = new THREE.MeshStandardMaterial({ color: 0xff0000, roughness: 0.2, emissive: 0x330000 });
+      // Gorilla Tag Hand Spheres
+      const handGeo = new THREE.SphereGeometry(0.14, 16, 16);
+      const handMat = new THREE.MeshStandardMaterial({
+        color: 0xcc1111,
+        roughness: 0.3,
+        emissive: 0x220000
+      });
 
       grip1.add(new THREE.Mesh(handGeo, handMat));
       grip2.add(new THREE.Mesh(handGeo, handMat));
@@ -114,87 +262,58 @@
       cameraGroup.add(grip2);
     }
 
-    function processMovement() {
+    // STRICT GORILLA TAG MOVEMENT ONLY (NO THUMBSTICKS)
+    function processGorillaTagMovement() {
       const session = renderer.xr.getSession();
       if (!session) return;
 
       scene.updateMatrixWorld(true);
 
       const hands = [
-        { grip: grip1, curr: currHandPos1, prev: prevHandPos1, index: 0 },
-        { grip: grip2, curr: currHandPos2, prev: prevHandPos2, index: 1 }
+        { grip: grip1, curr: handCurrPos1, prev: handPrevPos1 },
+        { grip: grip2, curr: handCurrPos2, prev: handPrevPos2 }
       ];
 
-      let isTouchingGround = false;
+      let isSwinging = false;
 
-      // Check input sources for active trigger/grip squeezes or thumbsticks
-      let inputIdx = 0;
-      for (const source of session.inputSources) {
-        if (!source.gamepad) continue;
+      // Get facing direction of headset camera
+      const lookDir = new THREE.Vector3();
+      camera.getWorldDirection(lookDir);
+      lookDir.y = 0;
+      lookDir.normalize();
 
-        const buttons = source.gamepad.buttons;
-        const axes = source.gamepad.axes;
+      hands.forEach((h) => {
+        if (!h.grip) return;
 
-        // 1. THUMBSTICK LOCOMOTION (Backup)
-        if (axes && axes.length >= 2) {
-          const axisX = axes[2] || axes[0] || 0;
-          const axisY = axes[3] || axes[1] || 0;
+        h.grip.getWorldPosition(h.curr);
 
-          if (Math.abs(axisX) > 0.1 || Math.abs(axisY) > 0.1) {
-            const moveSpeed = 0.08;
-            const dir = new THREE.Vector3();
-            camera.getWorldDirection(dir);
-            dir.y = 0;
-            dir.normalize();
+        // Movement delta of hand between frames
+        const delta = new THREE.Vector3().subVectors(h.prev, h.curr);
 
-            const sideDir = new THREE.Vector3().crossVectors(camera.up, dir).normalize();
+        // Detect arm swing: downward swing or backward push
+        const swingSpeed = delta.length();
 
-            cameraGroup.position.addScaledVector(dir, -axisY * moveSpeed);
-            cameraGroup.position.addScaledVector(sideDir, -axisX * moveSpeed);
+        if (swingSpeed > 0.005) {
+          isSwinging = true;
+
+          // Push player in direction headset is looking based on arm motion intensity
+          const forwardPush = (delta.y * 1.8) + (delta.z * -1.2 * lookDir.z) + (delta.x * -1.2 * lookDir.x);
+          
+          if (forwardPush > 0) {
+            cameraGroup.position.addScaledVector(lookDir, Math.min(forwardPush, 0.25));
+          }
+
+          // Downward arm slap vertical jump launch
+          if (delta.y > 0.015) {
+            playerVelocityY = Math.min(delta.y * 1.5, 0.12);
           }
         }
 
-        // 2. GORILLA TAG ARM PHYSICS (Hold Grip or Trigger to grab air/ground and pull)
-        const isTriggerPressed = buttons[0] && buttons[0].pressed;
-        const isGripPressed = buttons[1] && buttons[1].pressed;
-        const isGrabbing = isTriggerPressed || isGripPressed;
+        h.prev.copy(h.curr);
+      });
 
-        const h = hands[inputIdx];
-        if (h && h.grip) {
-          h.grip.getWorldPosition(h.curr);
-
-          const delta = new THREE.Vector3().subVectors(h.prev, h.curr);
-
-          // Bound delta values
-          delta.x = Math.max(-MAX_SWING_SPEED, Math.min(MAX_SWING_SPEED, delta.x));
-          delta.z = Math.max(-MAX_SWING_SPEED, Math.min(MAX_SWING_SPEED, delta.z));
-          delta.y = Math.max(-MAX_SWING_SPEED, Math.min(MAX_SWING_SPEED, delta.y));
-
-          // Calculate height relative to player rig base
-          const groundHeight = cameraGroup.position.y + 0.9;
-
-          // If controller hand is low enough OR player holds grip/trigger to pull air
-          if (isGrabbing || h.curr.y <= groundHeight) {
-            isTouchingGround = true;
-
-            // Propel player in reverse of hand motion
-            cameraGroup.position.x += delta.x * 2.0;
-            cameraGroup.position.z += delta.z * 2.0;
-
-            // Vertical leap on slap down
-            if (delta.y > 0) {
-              playerVelocityY = Math.min(delta.y * 1.5, MAX_JUMP_FORCE);
-            }
-          }
-
-          h.prev.copy(h.curr);
-        }
-
-        inputIdx++;
-      }
-
-      // 3. GRAVITY
-      if (!isTouchingGround && cameraGroup.position.y > 0) {
+      // Gravity Physics
+      if (!isSwinging && cameraGroup.position.y > 0) {
         playerVelocityY += gravity;
         cameraGroup.position.y += playerVelocityY;
 
@@ -202,64 +321,13 @@
           cameraGroup.position.y = 0;
           playerVelocityY = 0;
         }
-      } else if (isTouchingGround) {
+      } else if (isSwinging) {
         if (playerVelocityY < 0) playerVelocityY = 0;
       }
 
-      // MAP BOUNDARIES (Prevents falling out of the scene)
-      cameraGroup.position.x = Math.max(-13, Math.min(13, cameraGroup.position.x));
-      cameraGroup.position.z = Math.max(-45, Math.min(10, cameraGroup.position.z));
-    }
-
-    function createEnvironment() {
-      const floorGeo = new THREE.PlaneGeometry(30, 100);
-      const floorMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.6 });
-      const floor = new THREE.Mesh(floorGeo, floorMat);
-      floor.rotation.x = -Math.PI / 2;
-      scene.add(floor);
-
-      const ceiling = floor.clone();
-      ceiling.position.y = 5;
-      ceiling.rotation.x = Math.PI / 2;
-      scene.add(ceiling);
-
-      const wallMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.7 });
-      
-      const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(100, 5), wallMat);
-      leftWall.position.set(-15, 2.5, 0);
-      leftWall.rotation.y = Math.PI / 2;
-      scene.add(leftWall);
-
-      const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(100, 5), wallMat);
-      rightWall.position.set(15, 2.5, 0);
-      rightWall.rotation.y = -Math.PI / 2;
-      scene.add(rightWall);
-    }
-
-    function createMonster() {
-      const monsterGroup = new THREE.Group();
-
-      const bodyGeo = new THREE.CylinderGeometry(0.5, 0.2, 3, 8);
-      const monsterMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2 });
-      const body = new THREE.Mesh(bodyGeo, monsterMat);
-      body.position.y = 1.5;
-      monsterGroup.add(body);
-
-      const eyeGeo = new THREE.SphereGeometry(0.08, 8, 8);
-      const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-      
-      const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-      leftEye.position.set(-0.18, 2.5, 0.3);
-      
-      const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-      rightEye.position.set(0.18, 2.5, 0.3);
-
-      monsterGroup.add(leftEye);
-      monsterGroup.add(rightEye);
-
-      monsterGroup.position.set(0, 0, -25);
-      scene.add(monsterGroup);
-      monster = monsterGroup;
+      // Keep player inside corridor boundaries
+      cameraGroup.position.x = Math.max(-5, Math.min(5, cameraGroup.position.x));
+      cameraGroup.position.z = Math.max(-35, Math.min(8, cameraGroup.position.z));
     }
 
     function onEnterVR() {
@@ -278,8 +346,8 @@
           document.getElementById('vr-button').style.display = 'block';
         });
       }).catch((err) => {
-        console.error("VR Session Failed:", err);
-        alert("Could not start VR session. Ensure the URL starts with https://");
+        console.error("VR Session Error:", err);
+        alert("Could not start VR session. Ensure site URL starts with https://");
       });
     }
 
@@ -290,15 +358,22 @@
     }
 
     function render(timestamp) {
-      processMovement();
+      // Execute strict Gorilla Tag Movement
+      processGorillaTagMovement();
 
-      if (flashlight) {
-        flashlight.intensity = 3.5 + Math.sin(timestamp * 0.02) * 0.3;
+      // Atmospheric Light Flickering
+      if (flickeringLight) {
+        flickeringLight.intensity = 2.0 + Math.sin(timestamp * 0.01) * 0.5 + (Math.random() < 0.08 ? -1.5 : 0);
       }
 
+      if (flashlight) {
+        flashlight.intensity = 4.8 + Math.sin(timestamp * 0.03) * 0.2;
+      }
+
+      // Creepy monster stalking behavior
       if (monster && monster.position.z < cameraGroup.position.z) {
-        monster.position.z += 0.01;
-        monster.position.x = Math.sin(timestamp * 0.003) * 0.8;
+        monster.position.z += 0.008;
+        monster.position.x = Math.sin(timestamp * 0.002) * 1.2;
       }
 
       renderer.render(scene, camera);
