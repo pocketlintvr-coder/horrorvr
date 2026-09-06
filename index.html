@@ -43,18 +43,34 @@
       z-index: 1000;
       pointer-events: none;
     }
+    #objective-ui {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      color: #ffffdd;
+      font-size: 18px;
+      font-weight: bold;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 10px 20px;
+      border-radius: 5px;
+      border: 1px solid #8b8b00;
+      z-index: 998;
+    }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
   <button id="vr-button">ENTER VR EXPERIENCE</button>
+  <div id="objective-ui">OBJECTIVE: Escape the Backrooms maze by finding the Glowing Exit Door!</div>
   <div id="jumpscare-overlay"></div>
 
   <script>
     let scene, camera, renderer, cameraGroup;
     let flashlight, ambientLight, flickeringLight;
     let monster;
+    let exitDoor;
+    let vrObjectiveMesh;
     let wallColliders = [];
     let audioCtx = null;
 
@@ -72,8 +88,9 @@
     const SNAP_ANGLE = Math.PI / 4;
     let canSnapTurn = true;
     let isJumpscaring = false;
+    let hasEscaped = false;
 
-    // 0 = Empty, 1 = Wall
+    // 0 = Empty, 1 = Wall, 2 = Exit Door
     const mazeGrid = [
       [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
       [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1],
@@ -84,7 +101,7 @@
       [1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1],
       [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1],
       [1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1],
-      [1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1],
+      [1, 0, 1, 0, 0, 0, 0, 0, 0, 2, 1],
       [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
     ];
     const CELL_SIZE = 4;
@@ -128,10 +145,35 @@
       buildMaze();
       createMonster();
       setupControllers();
+      createVrObjectiveText();
 
       document.getElementById('vr-button').addEventListener('click', onEnterVR);
       window.addEventListener('resize', onWindowResize);
       renderer.setAnimationLoop(render);
+    }
+
+    function createVrObjectiveText() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(0, 0, 512, 128);
+      ctx.strokeStyle = '#ffff00';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(4, 4, 504, 120);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('OBJECTIVE: Escape the Maze!', 256, 50);
+      ctx.fillText('Find the Glowing Red Exit Door', 256, 85);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+      const geo = new THREE.PlaneGeometry(1.2, 0.3);
+      vrObjectiveMesh = new THREE.Mesh(geo, mat);
+      vrObjectiveMesh.position.set(0, 0.5, -1.5);
+      camera.add(vrObjectiveMesh);
     }
 
     function resetPlayerPosition() {
@@ -142,7 +184,7 @@
     function resetMonsterPosition() {
       if (monster) {
         monster.scale.set(2.2, 2.8, 1);
-        monster.position.set(9 * CELL_SIZE, 1.4, 9 * CELL_SIZE);
+        monster.position.set(8 * CELL_SIZE, 1.4, 8 * CELL_SIZE);
       }
     }
 
@@ -172,7 +214,7 @@
     }
 
     function triggerJumpscare() {
-      if (isJumpscaring) return;
+      if (isJumpscaring || hasEscaped) return;
       isJumpscaring = true;
 
       playJumpscareSound();
@@ -180,14 +222,18 @@
       const overlay = document.getElementById('jumpscare-overlay');
       overlay.style.display = 'block';
 
-      // Downscale monster so it fits nicely on screen during the jumpscare
+      // Downscale monster so it fits nicely on screen
       monster.scale.set(1.2, 1.5, 1);
 
-      // Position monster directly ahead in full view
+      // Place monster directly in front of camera view at eye height (y offset applied relative to player camera)
       const viewDir = new THREE.Vector3();
       camera.getWorldDirection(viewDir);
-      monster.position.copy(cameraGroup.position).addScaledVector(viewDir, 1.2);
-      monster.position.y += 0.2;
+      
+      const headPos = new THREE.Vector3();
+      camera.getWorldPosition(headPos);
+
+      monster.position.copy(headPos).addScaledVector(viewDir, 1.0);
+      monster.position.y = headPos.y - 0.2; // Aligned directly with eye level
 
       let shakeFrames = 0;
       const shakeInterval = setInterval(() => {
@@ -203,6 +249,22 @@
           isJumpscaring = false;
         }
       }, 30);
+    }
+
+    function triggerEscapeWin() {
+      if (hasEscaped) return;
+      hasEscaped = true;
+      
+      const ui = document.getElementById('objective-ui');
+      ui.innerText = "YOU ESCAPED THE BACKROOMS!";
+      ui.style.color = "#00ff00";
+
+      alert("YOU ESCAPED THE BACKROOMS!");
+      resetPlayerPosition();
+      resetMonsterPosition();
+      hasEscaped = false;
+      ui.innerText = "OBJECTIVE: Escape the Backrooms maze by finding the Glowing Exit Door!";
+      ui.style.color = "#ffffdd";
     }
 
     function buildMaze() {
@@ -235,7 +297,7 @@
       ceiling.rotation.x = Math.PI / 2;
       scene.add(ceiling);
 
-      // Walls
+      // Walls & Exit Door
       const wallGeo = new THREE.BoxGeometry(CELL_SIZE, 3.5, CELL_SIZE);
       const wallMat = new THREE.MeshStandardMaterial({ map: wallTexture, roughness: 0.7 });
 
@@ -246,6 +308,17 @@
             wall.position.set(c * CELL_SIZE, 1.75, r * CELL_SIZE);
             scene.add(wall);
             wallColliders.push(new THREE.Box3().setFromObject(wall));
+          } else if (mazeGrid[r][c] === 2) {
+            // Exit Door Objective
+            const doorGeo = new THREE.BoxGeometry(CELL_SIZE * 0.8, 3.2, 0.4);
+            const doorMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xaa0000 });
+            exitDoor = new THREE.Mesh(doorGeo, doorMat);
+            exitDoor.position.set(c * CELL_SIZE, 1.6, r * CELL_SIZE);
+            scene.add(exitDoor);
+
+            const exitLight = new THREE.PointLight(0xff0000, 3, 8);
+            exitLight.position.set(c * CELL_SIZE, 2.0, r * CELL_SIZE);
+            scene.add(exitLight);
           }
         }
       }
@@ -293,11 +366,11 @@
 
       const currentSwingVelocity = dist1 + dist2;
 
-      // Smoothly accumulate arm swing movement into extra velocity boost
+      // Accelerate move speed when swinging arms
       if (currentSwingVelocity > 0.02) {
         armSwingSpeedBoost = Math.min(0.08, armSwingSpeedBoost + currentSwingVelocity * 0.8);
       } else {
-        armSwingSpeedBoost *= 0.85; // Decay when arms stop moving
+        armSwingSpeedBoost *= 0.85;
       }
 
       prevController1Pos.copy(currPos1);
@@ -305,7 +378,7 @@
     }
 
     function processThumbstickLocomotion() {
-      if (isJumpscaring) return;
+      if (isJumpscaring || hasEscaped) return;
 
       updateArmSwingMotion();
 
@@ -324,7 +397,7 @@
           continue;
         }
 
-        // Movement with active speed boost based on arm swinging
+        // Movement with arm-swing boost
         if (source.handedness === 'left') {
           const currentSpeed = BASE_MOVE_SPEED + armSwingSpeedBoost;
 
@@ -340,6 +413,12 @@
             .addScaledVector(rightDir, xAxis * currentSpeed);
 
           const nextPos = cameraGroup.position.clone().add(moveVec);
+
+          // Check Exit Door Objective reach
+          if (exitDoor && nextPos.distanceTo(exitDoor.position) < 1.8) {
+            triggerEscapeWin();
+            return;
+          }
 
           // Wall collision check
           let collide = false;
@@ -405,7 +484,7 @@
         flickeringLight.intensity = 1.0 + Math.sin(timestamp * 0.015) * 0.8 + (Math.random() < 0.08 ? -1.2 : 0);
       }
 
-      if (monster && !isJumpscaring) {
+      if (monster && !isJumpscaring && !hasEscaped) {
         const dir = new THREE.Vector3().subVectors(cameraGroup.position, monster.position);
         dir.y = 0;
         const distance = dir.length();
@@ -415,6 +494,8 @@
         } else {
           dir.normalize();
           monster.position.addScaledVector(dir, MONSTER_SPEED);
+          // Keep monster baseline height visually grounded above floor
+          monster.position.y = 1.4;
         }
       }
 
