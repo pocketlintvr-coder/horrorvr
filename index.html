@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VR Dreamcore Survival Experience</title>
+  <title>VR Dreamcore Survival Experience - Infinite World</title>
   <style>
     body {
       margin: 0;
       overflow: hidden;
       background-color: #000;
-      font-family: sans-serif;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
     #vr-button {
       position: absolute;
@@ -48,13 +48,14 @@
       top: 20px;
       left: 20px;
       color: #ffffff;
-      font-size: 18px;
+      font-size: 16px;
       font-weight: bold;
-      background: rgba(0, 0, 0, 0.6);
+      background: rgba(0, 0, 0, 0.7);
       padding: 12px 24px;
       border-radius: 5px;
       border: 1px solid #00ffff;
       z-index: 998;
+      backdrop-filter: blur(4px);
     }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -62,31 +63,41 @@
 <body>
 
   <button id="vr-button">ENTER VR SURVIVAL</button>
-  <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | NIGHT SURVIVAL</div>
+  <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | CRYSTALS: 0 | DAY 1</div>
   <div id="damage-overlay"></div>
 
   <script>
     let scene, camera, renderer, cameraGroup;
     let ambientLight, sunLight, flashlight;
-    let skySphereMesh, daySkyTexture, nightSkyTexture;
+    let skySphereMesh, daySkyTexture, nightSkyTexture, customGrassTexture;
 
-    // Survival Stats
+    // Game Stats
     let health = 100;
     let hunger = 100;
+    let crystalsCollected = 0;
+    let daysSurvived = 1;
     let isNight = false;
     let dayNightTimer = 0;
     let isGameOver = false;
 
-    // Wrist Watch HUD & Sword
+    // Wrist Watch HUD & Equipment
     let watchGroup, watchCanvas, watchCtx, watchTexture;
     let swordMesh;
-    let swordBox = new THREE.Box3();
     let prevSwordPos = new THREE.Vector3();
     let swordVelocity = 0;
 
-    // Entities
+    // Infinite World Chunk Management
+    const CHUNK_SIZE = 120;
+    const CHUNK_SEGMENTS = 32;
+    const VIEW_DISTANCE = 2; // Chunks rendered in each direction
+    const activeChunks = new Map();
+    let lastPlayerChunkX = Infinity;
+    let lastPlayerChunkZ = Infinity;
+
+    // Entities & Objects
     let eyeMonsters = [];
     let foodApples = [];
+    let dreamCrystals = [];
     let audioCtx = null;
 
     // Motion & VR Controls
@@ -95,7 +106,7 @@
     let prevController1Pos = new THREE.Vector3();
     let prevController2Pos = new THREE.Vector3();
     let armSwingSpeedBoost = 0;
-    const BASE_MOVE_SPEED = 0.08;
+    const BASE_MOVE_SPEED = 0.09;
     const SNAP_ANGLE = Math.PI / 4;
     let canSnapTurn = true;
 
@@ -103,41 +114,53 @@
 
     function init() {
       scene = new THREE.Scene();
-      scene.fog = new THREE.FogExp2(0xaaccff, 0.005);
+      scene.fog = new THREE.FogExp2(0xaaccff, 0.007);
 
       cameraGroup = new THREE.Group();
       scene.add(cameraGroup);
 
-      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 800);
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
       cameraGroup.add(camera);
 
       renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       document.body.appendChild(renderer.domElement);
 
-      // Lights
-      ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
+      // Lighting Setup
+      ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
       scene.add(ambientLight);
 
       sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
-      sunLight.position.set(50, 100, 50);
+      sunLight.position.set(100, 150, 50);
+      sunLight.castShadow = true;
+      sunLight.shadow.mapSize.width = 2048;
+      sunLight.shadow.mapSize.height = 2048;
+      sunLight.shadow.camera.near = 0.5;
+      sunLight.shadow.camera.far = 300;
+      const d = 80;
+      sunLight.shadow.camera.left = -d;
+      sunLight.shadow.camera.right = d;
+      sunLight.shadow.camera.top = d;
+      sunLight.shadow.camera.bottom = -d;
       scene.add(sunLight);
 
-      flashlight = new THREE.SpotLight(0xfffbe6, 5, 25, Math.PI / 5, 0.4, 1);
+      flashlight = new THREE.SpotLight(0xfffbe6, 8, 35, Math.PI / 5, 0.5, 1);
       const lightTarget = new THREE.Object3D();
       lightTarget.position.set(0, 0, -5);
       camera.add(lightTarget);
       flashlight.target = lightTarget;
       flashlight.visible = false;
+      flashlight.castShadow = true;
       camera.add(flashlight);
 
-      buildDreamcoreLevel();
+      loadTexturesAndAssets();
       setupControllers();
       createSword();
       createWristWatch();
-      spawnFoodApples(15);
 
       resetPlayerPosition();
 
@@ -146,19 +169,192 @@
       renderer.setAnimationLoop(render);
     }
 
+    // Mathematical Terrain Generator (Noise Simulation)
     function getTerrainHeight(x, z) {
-      return Math.sin(x * 0.05) * Math.cos(z * 0.05) * 6 + Math.sin(x * 0.02) * 8;
+      const scale1 = Math.sin(x * 0.03) * Math.cos(z * 0.03) * 7.0;
+      const scale2 = Math.sin(x * 0.01) * Math.sin(z * 0.01) * 12.0;
+      const detail = Math.cos(x * 0.08 + z * 0.08) * 1.5;
+      return scale1 + scale2 + detail;
     }
 
     function resetPlayerPosition() {
       health = 100;
       hunger = 100;
+      crystalsCollected = 0;
+      daysSurvived = 1;
       isGameOver = false;
+      
       const terrainY = getTerrainHeight(0, 0);
       cameraGroup.position.set(0, terrainY + 1.6, 0);
       cameraGroup.rotation.set(0, 0, 0);
+
+      updateChunks(true);
       updateWatchScreen();
       update2DUI();
+    }
+
+    function loadTexturesAndAssets() {
+      const textureLoader = new THREE.TextureLoader();
+
+      customGrassTexture = textureLoader.load('https://i.postimg.cc/C1PN1FWR/Getty-Images-1407861824-ee2a308b7f134e509f4d3463653d6cfe.jpg');
+      customGrassTexture.wrapS = THREE.RepeatWrapping;
+      customGrassTexture.wrapT = THREE.RepeatWrapping;
+      customGrassTexture.repeat.set(12, 12);
+
+      daySkyTexture = textureLoader.load('https://i.postimg.cc/BZzpfnTN/images-(7).jpg');
+      nightSkyTexture = textureLoader.load('https://i.postimg.cc/FKGbWrFs/images-(8).jpg');
+
+      const skyGeo = new THREE.SphereGeometry(750, 60, 40);
+      const skyMat = new THREE.MeshBasicMaterial({ map: daySkyTexture, side: THREE.BackSide });
+      skySphereMesh = new THREE.Mesh(skyGeo, skyMat);
+      scene.add(skySphereMesh);
+    }
+
+    // Infinite Procedural Terrain Chunks
+    function updateChunks(forceUpdate = false) {
+      const playerX = cameraGroup.position.x;
+      const playerZ = cameraGroup.position.z;
+
+      const chunkX = Math.floor(playerX / CHUNK_SIZE);
+      const chunkZ = Math.floor(playerZ / CHUNK_SIZE);
+
+      if (!forceUpdate && chunkX === lastPlayerChunkX && chunkZ === lastPlayerChunkZ) return;
+
+      lastPlayerChunkX = chunkX;
+      lastPlayerChunkZ = chunkZ;
+
+      const currentKeys = new Set();
+
+      for (let x = -VIEW_DISTANCE; x <= VIEW_DISTANCE; x++) {
+        for (let z = -VIEW_DISTANCE; z <= VIEW_DISTANCE; z++) {
+          const cX = chunkX + x;
+          const cZ = chunkZ + z;
+          const key = `${cX},${cZ}`;
+          currentKeys.add(key);
+
+          if (!activeChunks.has(key)) {
+            const chunkGroup = createChunkGroup(cX, cZ);
+            scene.add(chunkGroup);
+            activeChunks.set(key, chunkGroup);
+          }
+        }
+      }
+
+      // Cleanup distant chunks
+      for (const [key, group] of activeChunks.entries()) {
+        if (!currentKeys.has(key)) {
+          scene.remove(group);
+          disposeGroup(group);
+          activeChunks.delete(key);
+        }
+      }
+    }
+
+    function createChunkGroup(cX, cZ) {
+      const chunkGroup = new THREE.Group();
+      const worldOffsetX = cX * CHUNK_SIZE;
+      const worldOffsetZ = cZ * CHUNK_SIZE;
+
+      // Terrain Mesh
+      const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, CHUNK_SEGMENTS, CHUNK_SEGMENTS);
+      geo.rotateX(-Math.PI / 2);
+
+      const pos = geo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const localX = pos.getX(i);
+        const localZ = pos.getZ(i);
+        const worldX = worldOffsetX + localX;
+        const worldZ = worldOffsetZ + localZ;
+        pos.setY(i, getTerrainHeight(worldX, worldZ));
+      }
+      geo.computeVertexNormals();
+
+      const grassMat = new THREE.MeshStandardMaterial({ map: customGrassTexture, roughness: 0.8, metalness: 0.1 });
+      const terrain = new THREE.Mesh(geo, grassMat);
+      terrain.position.set(worldOffsetX + CHUNK_SIZE / 2, 0, worldOffsetZ + CHUNK_SIZE / 2);
+      terrain.receiveShadow = true;
+      chunkGroup.add(terrain);
+
+      // Procedurally populate chunk elements
+      populateChunkElements(chunkGroup, worldOffsetX, worldOffsetZ);
+
+      return chunkGroup;
+    }
+
+    function populateChunkElements(group, offsetX, offsetZ) {
+      // Deterministic random generator based on coordinates
+      const pseudoRandom = (x, z) => {
+        return Math.sin(x * 12.9898 + z * 78.233) * 43758.5453 % 1;
+      };
+
+      const houseMat = new THREE.MeshStandardMaterial({ color: 0xfffdd0, roughness: 0.4 });
+      const roofMat = new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.6 });
+
+      // Spawn Liminal House per chunk probability
+      if (Math.abs(pseudoRandom(offsetX, offsetZ)) > 0.65) {
+        const hX = offsetX + 20 + Math.abs(pseudoRandom(offsetX, 0)) * (CHUNK_SIZE - 40);
+        const hZ = offsetZ + 20 + Math.abs(pseudoRandom(0, offsetZ)) * (CHUNK_SIZE - 40);
+        const hY = getTerrainHeight(hX, hZ);
+
+        const houseGroup = new THREE.Group();
+        const bodyGeo = new THREE.BoxGeometry(6, 6, 6);
+        const houseBody = new THREE.Mesh(bodyGeo, houseMat);
+        houseBody.position.y = 3;
+        houseBody.castShadow = true;
+        houseBody.receiveShadow = true;
+
+        const roofGeo = new THREE.ConeGeometry(5.5, 3.5, 4);
+        const roof = new THREE.Mesh(roofGeo, roofMat);
+        roof.position.y = 7.75;
+        roof.rotation.y = Math.PI / 4;
+        roof.castShadow = true;
+
+        houseGroup.add(houseBody);
+        houseGroup.add(roof);
+        houseGroup.position.set(hX, hY, hZ);
+        group.add(houseGroup);
+      }
+
+      // Spawn Food (Apples)
+      for (let i = 0; i < 3; i++) {
+        const aX = offsetX + Math.abs(pseudoRandom(offsetX + i, offsetZ)) * CHUNK_SIZE;
+        const aZ = offsetZ + Math.abs(pseudoRandom(offsetX, offsetZ + i)) * CHUNK_SIZE;
+        const aY = getTerrainHeight(aX, aZ) + 0.3;
+
+        const appleGeo = new THREE.SphereGeometry(0.2, 12, 12);
+        const appleMat = new THREE.MeshStandardMaterial({ color: 0xff0033, roughness: 0.2, emissive: 0x440011 });
+        const apple = new THREE.Mesh(appleGeo, appleMat);
+        apple.position.set(aX, aY, aZ);
+        apple.castShadow = true;
+
+        group.add(apple);
+        foodApples.push({ mesh: apple, group: group });
+      }
+
+      // Spawn Collectible Crystals
+      if (Math.abs(pseudoRandom(offsetZ, offsetX)) > 0.4) {
+        const cX = offsetX + Math.abs(pseudoRandom(offsetX * 2, offsetZ)) * CHUNK_SIZE;
+        const cZ = offsetZ + Math.abs(pseudoRandom(offsetX, offsetZ * 2)) * CHUNK_SIZE;
+        const cY = getTerrainHeight(cX, cZ) + 0.8;
+
+        const crystalGeo = new THREE.OctahedronGeometry(0.4, 0);
+        const crystalMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.8, roughness: 0.1 });
+        const crystal = new THREE.Mesh(crystalGeo, crystalMat);
+        crystal.position.set(cX, cY, cZ);
+
+        group.add(crystal);
+        dreamCrystals.push({ mesh: crystal, group: group });
+      }
+    }
+
+    function disposeGroup(group) {
+      group.traverse(child => {
+        if (child.isMesh) {
+          child.geometry.dispose();
+          if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+          else child.material.dispose();
+        }
+      });
     }
 
     function createWristWatch() {
@@ -206,35 +402,40 @@
       watchCtx.strokeRect(6, 6, 244, 244);
 
       watchCtx.fillStyle = '#ffffff';
-      watchCtx.font = 'bold 20px sans-serif';
+      watchCtx.font = 'bold 18px sans-serif';
       watchCtx.textAlign = 'center';
-      watchCtx.fillText('SURVIVAL HUD', 128, 35);
+      watchCtx.fillText(`DAY ${daysSurvived} SURVIVAL`, 128, 32);
 
       // Health Bar
       watchCtx.fillStyle = '#440000';
-      watchCtx.fillRect(20, 60, 216, 45);
+      watchCtx.fillRect(20, 48, 216, 38);
       watchCtx.fillStyle = '#ff2222';
-      watchCtx.fillRect(20, 60, (health / 100) * 216, 45);
+      watchCtx.fillRect(20, 48, (health / 100) * 216, 38);
       watchCtx.strokeStyle = '#ffffff';
       watchCtx.lineWidth = 2;
-      watchCtx.strokeRect(20, 60, 216, 45);
+      watchCtx.strokeRect(20, 48, 216, 38);
       watchCtx.fillStyle = '#ffffff';
-      watchCtx.font = 'bold 18px sans-serif';
-      watchCtx.fillText(`HP: ${Math.round(health)}`, 128, 88);
+      watchCtx.font = 'bold 16px sans-serif';
+      watchCtx.fillText(`HP: ${Math.round(health)}`, 128, 72);
 
       // Hunger Bar
       watchCtx.fillStyle = '#443300';
-      watchCtx.fillRect(20, 130, 216, 45);
+      watchCtx.fillRect(20, 98, 216, 38);
       watchCtx.fillStyle = '#ffaa00';
-      watchCtx.fillRect(20, 130, (hunger / 100) * 216, 45);
-      watchCtx.strokeRect(20, 130, 216, 45);
+      watchCtx.fillRect(20, 98, (hunger / 100) * 216, 38);
+      watchCtx.strokeRect(20, 98, 216, 38);
       watchCtx.fillStyle = '#ffffff';
-      watchCtx.fillText(`HUNGER: ${Math.round(hunger)}`, 128, 158);
+      watchCtx.fillText(`HUNGER: ${Math.round(hunger)}`, 128, 122);
+
+      // Crystals Counter
+      watchCtx.fillStyle = '#00ffff';
+      watchCtx.font = 'bold 16px sans-serif';
+      watchCtx.fillText(`CRYSTALS: ${crystalsCollected}`, 128, 168);
 
       // Status Indicator
       watchCtx.fillStyle = isNight ? '#ff3333' : '#33ff33';
-      watchCtx.font = 'bold 16px sans-serif';
-      watchCtx.fillText(isNight ? 'NIGHT: DANGER' : 'DAY: GATHER FOOD', 128, 215);
+      watchCtx.font = 'bold 15px sans-serif';
+      watchCtx.fillText(isNight ? 'NIGHT: EYE SWARM' : 'DAY: EXPLORE & HARVEST', 128, 215);
 
       if (watchTexture) watchTexture.needsUpdate = true;
     }
@@ -242,104 +443,30 @@
     function createSword() {
       const swordGroup = new THREE.Group();
 
-      // Blade
-      const bladeGeo = new THREE.BoxGeometry(0.04, 0.7, 0.015);
-      const bladeMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.5, metalness: 0.8, roughness: 0.2 });
+      // Glowing Blade
+      const bladeGeo = new THREE.BoxGeometry(0.04, 0.75, 0.015);
+      const bladeMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.6, metalness: 0.9, roughness: 0.1 });
       const blade = new THREE.Mesh(bladeGeo, bladeMat);
-      blade.position.y = 0.4;
+      blade.position.y = 0.42;
+      blade.castShadow = true;
       swordGroup.add(blade);
 
       // Guard & Hilt
-      const guardGeo = new THREE.BoxGeometry(0.16, 0.02, 0.04);
+      const guardGeo = new THREE.BoxGeometry(0.18, 0.02, 0.04);
       const hiltMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9 });
       const guard = new THREE.Mesh(guardGeo, hiltMat);
       guard.position.y = 0.05;
       swordGroup.add(guard);
 
-      const handleGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.12, 16);
+      const handleGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.14, 16);
       const handle = new THREE.Mesh(handleGeo, hiltMat);
-      handle.position.y = -0.02;
+      handle.position.y = -0.03;
       swordGroup.add(handle);
 
       swordMesh = swordGroup;
       grip2.add(swordMesh);
       swordMesh.position.set(0, 0, -0.05);
       swordMesh.rotation.set(-Math.PI / 4, 0, 0);
-    }
-
-    function buildDreamcoreLevel() {
-      const textureLoader = new THREE.TextureLoader();
-
-      const customGrassTexture = textureLoader.load('https://i.postimg.cc/C1PN1FWR/Getty-Images-1407861824-ee2a308b7f134e509f4d3463653d6cfe.jpg');
-      customGrassTexture.wrapS = THREE.RepeatWrapping;
-      customGrassTexture.wrapT = THREE.RepeatWrapping;
-      customGrassTexture.repeat.set(25, 25);
-
-      daySkyTexture = textureLoader.load('https://i.postimg.cc/BZzpfnTN/images-(7).jpg');
-      nightSkyTexture = textureLoader.load('https://i.postimg.cc/FKGbWrFs/images-(8).jpg');
-
-      const skyGeo = new THREE.SphereGeometry(450, 60, 40);
-      const skyMat = new THREE.MeshBasicMaterial({ map: daySkyTexture, side: THREE.BackSide });
-      skySphereMesh = new THREE.Mesh(skyGeo, skyMat);
-      scene.add(skySphereMesh);
-
-      const terrainGeo = new THREE.PlaneGeometry(350, 350, 120, 120);
-      terrainGeo.rotateX(-Math.PI / 2);
-
-      const pos = terrainGeo.attributes.position;
-      for (let i = 0; i < pos.count; i++) {
-        const x = pos.getX(i);
-        const z = pos.getZ(i);
-        pos.setY(i, getTerrainHeight(x, z));
-      }
-      terrainGeo.computeVertexNormals();
-
-      const grassMat = new THREE.MeshStandardMaterial({ map: customGrassTexture, roughness: 0.8 });
-      const terrain = new THREE.Mesh(terrainGeo, grassMat);
-      scene.add(terrain);
-
-      // Liminal Houses
-      const houseMat = new THREE.MeshStandardMaterial({ color: 0xfffdd0, roughness: 0.5 });
-      const roofMat = new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.6 });
-
-      const houseXZPositions = [
-        { x: -35, z: -45 }, { x: 55, z: -65 },
-        { x: -25, z: 65 }, { x: 65, z: 45 }
-      ];
-
-      houseXZPositions.forEach(p => {
-        const terrainY = getTerrainHeight(p.x, p.z);
-        const houseGroup = new THREE.Group();
-
-        const bodyGeo = new THREE.BoxGeometry(6, 6, 6);
-        const houseBody = new THREE.Mesh(bodyGeo, houseMat);
-        houseBody.position.y = 3;
-
-        const roofGeo = new THREE.ConeGeometry(5, 3, 4);
-        const roof = new THREE.Mesh(roofGeo, roofMat);
-        roof.position.y = 7.5;
-        roof.rotation.y = Math.PI / 4;
-
-        houseGroup.add(houseBody);
-        houseGroup.add(roof);
-        houseGroup.position.set(p.x, terrainY, p.z);
-        scene.add(houseGroup);
-      });
-    }
-
-    function spawnFoodApples(count) {
-      const appleGeo = new THREE.SphereGeometry(0.2, 16, 16);
-      const appleMat = new THREE.MeshStandardMaterial({ color: 0xff0033, roughness: 0.3, emissive: 0x440011 });
-
-      for (let i = 0; i < count; i++) {
-        const apple = new THREE.Mesh(appleGeo, appleMat);
-        const x = (Math.random() - 0.5) * 200;
-        const z = (Math.random() - 0.5) * 200;
-        const y = getTerrainHeight(x, z) + 0.3;
-        apple.position.set(x, y, z);
-        scene.add(apple);
-        foodApples.push(apple);
-      }
     }
 
     function spawnEyeMonsters(count) {
@@ -351,7 +478,7 @@
         const eye = new THREE.Sprite(mat);
         const playerPos = cameraGroup.position;
         const angle = Math.random() * Math.PI * 2;
-        const dist = 30 + Math.random() * 20;
+        const dist = 30 + Math.random() * 25;
 
         const ex = playerPos.x + Math.cos(angle) * dist;
         const ez = playerPos.z + Math.sin(angle) * dist;
@@ -359,7 +486,7 @@
 
         eye.position.set(ex, ey, ez);
         eye.scale.set(4.5, 4.5, 1);
-        eye.userData = { hp: 3, speed: 0.06 + Math.random() * 0.03 };
+        eye.userData = { hp: 3 + Math.floor(daysSurvived * 0.5), speed: 0.07 + Math.random() * 0.03 };
         scene.add(eye);
         eyeMonsters.push(eye);
       }
@@ -403,7 +530,7 @@
       const currentSwingVelocity = dist1 + dist2;
 
       if (currentSwingVelocity > 0.02) {
-        armSwingSpeedBoost = Math.min(0.08, armSwingSpeedBoost + currentSwingVelocity * 0.8);
+        armSwingSpeedBoost = Math.min(0.09, armSwingSpeedBoost + currentSwingVelocity * 0.85);
       } else {
         armSwingSpeedBoost *= 0.85;
       }
@@ -450,6 +577,8 @@
           const terrainY = getTerrainHeight(nextPos.x, nextPos.z);
           nextPos.y = terrainY + 1.6;
           cameraGroup.position.copy(nextPos);
+
+          updateChunks();
         }
 
         if (source.handedness === 'right') {
@@ -465,12 +594,12 @@
       dayNightTimer += deltaTime;
 
       // Deplete Hunger over time
-      hunger = Math.max(0, hunger - deltaTime * 0.8);
+      hunger = Math.max(0, hunger - deltaTime * 0.7);
       if (hunger <= 0) {
-        health = Math.max(0, health - deltaTime * 2.0);
+        health = Math.max(0, health - deltaTime * 2.5);
       }
 
-      if (dayNightTimer >= 35) {
+      if (dayNightTimer >= 40) {
         dayNightTimer = 0;
         isNight = !isNight;
 
@@ -479,24 +608,24 @@
           skySphereMesh.material.needsUpdate = true;
           scene.fog.color.setHex(0x050515);
           scene.fog.density = 0.015;
-          ambientLight.color.setHex(0x333355);
-          ambientLight.intensity = 0.25;
-          sunLight.intensity = 0.2;
+          ambientLight.color.setHex(0x222244);
+          ambientLight.intensity = 0.2;
+          sunLight.intensity = 0.1;
           flashlight.visible = true;
 
-          spawnEyeMonsters(4);
+          spawnEyeMonsters(5 + Math.min(10, daysSurvived * 2));
         } else {
+          daysSurvived++;
           skySphereMesh.material.map = daySkyTexture;
           skySphereMesh.material.needsUpdate = true;
           scene.fog.color.setHex(0xaaccff);
-          scene.fog.density = 0.005;
+          scene.fog.density = 0.007;
           ambientLight.color.setHex(0xffffff);
-          ambientLight.intensity = 0.9;
+          ambientLight.intensity = 0.8;
           sunLight.intensity = 1.2;
           flashlight.visible = false;
 
           clearEyeMonsters();
-          spawnFoodApples(6);
         }
       }
 
@@ -511,38 +640,35 @@
     function updateCombatAndInteractions() {
       if (isGameOver || !swordMesh) return;
 
-      // Sword Swing Speed Calculation
       const currSwordWorldPos = new THREE.Vector3();
       swordMesh.getWorldPosition(currSwordWorldPos);
       swordVelocity = currSwordWorldPos.distanceTo(prevSwordPos);
       prevSwordPos.copy(currSwordWorldPos);
 
-      // Check Sword Collision with Eye Monsters
+      // Sword Combat vs Eye Monsters
       for (let i = eyeMonsters.length - 1; i >= 0; i--) {
         const eye = eyeMonsters[i];
         const distToSword = currSwordWorldPos.distanceTo(eye.position);
 
-        if (distToSword < 2.0 && swordVelocity > 0.04) {
+        if (distToSword < 2.2 && swordVelocity > 0.035) {
           eye.userData.hp -= 1;
-          playSound(220, 'sawtooth', 0.2);
+          playSound(260, 'sawtooth', 0.15);
 
-          // Knockback effect
           const pushDir = new THREE.Vector3().subVectors(eye.position, currSwordWorldPos).normalize();
-          eye.position.addScaledVector(pushDir, 3.0);
+          eye.position.addScaledVector(pushDir, 3.5);
 
           if (eye.userData.hp <= 0) {
             scene.remove(eye);
             eyeMonsters.splice(i, 1);
           }
         } else {
-          // Eye attacks player
           const playerPos = cameraGroup.position.clone();
           const dirToPlayer = new THREE.Vector3().subVectors(playerPos, eye.position);
           const distToPlayer = dirToPlayer.length();
           dirToPlayer.normalize();
 
           if (distToPlayer <= 1.2) {
-            health = Math.max(0, health - 0.4);
+            health = Math.max(0, health - 0.5);
             triggerDamageFlash();
           } else {
             eye.position.addScaledVector(dirToPlayer, eye.userData.speed);
@@ -551,16 +677,34 @@
         }
       }
 
-      // Check Food Collection
       const playerPos = cameraGroup.position;
+
+      // Food Apples Collection
       for (let i = foodApples.length - 1; i >= 0; i--) {
-        const apple = foodApples[i];
-        if (playerPos.distanceTo(apple.position) < 1.8) {
-          hunger = Math.min(100, hunger + 25);
-          health = Math.min(100, health + 10);
-          playSound(440, 'sine', 0.15);
-          scene.remove(apple);
+        const item = foodApples[i];
+        const appleWorldPos = new THREE.Vector3();
+        item.mesh.getWorldPosition(appleWorldPos);
+
+        if (playerPos.distanceTo(appleWorldPos) < 2.0) {
+          hunger = Math.min(100, hunger + 30);
+          health = Math.min(100, health + 15);
+          playSound(520, 'sine', 0.15);
+          item.group.remove(item.mesh);
           foodApples.splice(i, 1);
+        }
+      }
+
+      // Dream Crystal Collection
+      for (let i = dreamCrystals.length - 1; i >= 0; i--) {
+        const item = dreamCrystals[i];
+        const crystalWorldPos = new THREE.Vector3();
+        item.mesh.getWorldPosition(crystalWorldPos);
+
+        if (playerPos.distanceTo(crystalWorldPos) < 2.0) {
+          crystalsCollected++;
+          playSound(880, 'triangle', 0.25);
+          item.group.remove(item.mesh);
+          dreamCrystals.splice(i, 1);
         }
       }
     }
@@ -573,8 +717,8 @@
 
     function triggerDeath() {
       isGameOver = true;
-      playSound(80, 'sawtooth', 0.8);
-      alert("You succumbed to the Dreamcore Hills... Respawning!");
+      playSound(90, 'sawtooth', 0.8);
+      alert(`You perished in the Dreamcore Hills on Day ${daysSurvived}!\nCrystals Collected: ${crystalsCollected}`);
       clearEyeMonsters();
       resetPlayerPosition();
     }
@@ -589,7 +733,7 @@
       const gain = audioCtx.createGain();
       osc.type = type;
       osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-      gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
       osc.connect(gain);
       gain.connect(audioCtx.destination);
@@ -599,7 +743,7 @@
 
     function update2DUI() {
       const ui = document.getElementById('objective-ui');
-      ui.innerText = `HEALTH: ${Math.round(health)} | HUNGER: ${Math.round(hunger)} | ${isNight ? 'NIGHTTIME (FIGHT THE EYES!)' : 'DAYTIME (COLLECT APPLES)'}`;
+      ui.innerText = `HEALTH: ${Math.round(health)} | HUNGER: ${Math.round(hunger)} | CRYSTALS: ${crystalsCollected} | DAY ${daysSurvived} (${isNight ? 'NIGHT' : 'DAY'})`;
       ui.style.color = isNight ? '#ff4444' : '#00ffff';
     }
 
@@ -642,11 +786,17 @@
 
       if (skySphereMesh) {
         skySphereMesh.position.copy(cameraGroup.position);
-        skySphereMesh.rotation.y += 0.0003;
+        skySphereMesh.rotation.y += 0.0002;
       }
 
-      // Rotate food apples
-      foodApples.forEach(a => a.rotation.y += 0.02);
+      // Animate Crystals Rotation
+      dreamCrystals.forEach(c => {
+        c.mesh.rotation.y += 0.03;
+        c.mesh.position.y += Math.sin(now * 0.003) * 0.002;
+      });
+
+      // Animate Apples Rotation
+      foodApples.forEach(a => a.mesh.rotation.y += 0.02);
 
       renderer.render(scene, camera);
     }
