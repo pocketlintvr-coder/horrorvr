@@ -39,16 +39,17 @@
     let scene, camera, renderer, flashlight;
     let monster, cameraGroup;
     
-    // VR Controllers & Physics
     let controller1, controller2;
-    const prevPos1 = new THREE.Vector3();
-    const prevPos2 = new THREE.Vector3();
-    const currentPos1 = new THREE.Vector3();
-    const currentPos2 = new THREE.Vector3();
+    let grip1, grip2;
+
+    // Movement tracking
+    const handWorldPos1 = new THREE.Vector3();
+    const handWorldPos2 = new THREE.Vector3();
+    const prevHandPos1 = new THREE.Vector3();
+    const prevHandPos2 = new THREE.Vector3();
     
     let playerVelocityY = 0;
-    const gravity = -0.005;
-    const floorY = 0;
+    const gravity = -0.008;
 
     init();
 
@@ -68,8 +69,7 @@
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
-      // Lighting & Flashlight
-      const ambientLight = new THREE.AmbientLight(0x050508, 0.2);
+      const ambientLight = new THREE.AmbientLight(0x050508, 0.3);
       scene.add(ambientLight);
 
       flashlight = new THREE.SpotLight(0xffffff, 2, 15, Math.PI / 6, 0.5, 1);
@@ -91,63 +91,74 @@
     function setupControllers() {
       controller1 = renderer.xr.getController(0);
       controller2 = renderer.xr.getController(1);
-
       cameraGroup.add(controller1);
       cameraGroup.add(controller2);
 
-      // Visible Hand Spheres
-      const handGeo = new THREE.SphereGeometry(0.12, 16, 16);
-      const handMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.3 });
+      grip1 = renderer.xr.getControllerGrip(0);
+      grip2 = renderer.xr.getControllerGrip(1);
 
-      controller1.add(new THREE.Mesh(handGeo, handMat));
-      controller2.add(new THREE.Mesh(handGeo, handMat));
+      // Gorilla style hand models (red spheres)
+      const handGeo = new THREE.SphereGeometry(0.12, 16, 16);
+      const handMat = new THREE.MeshStandardMaterial({ color: 0xaa0000, roughness: 0.4 });
+
+      grip1.add(new THREE.Mesh(handGeo, handMat));
+      grip2.add(new THREE.Mesh(handGeo, handMat));
+
+      cameraGroup.add(grip1);
+      cameraGroup.add(grip2);
     }
 
-    function handleGorillaPhysics() {
-      const controllers = [
-        { obj: controller1, prev: prevPos1, curr: currentPos1 },
-        { obj: controller2, prev: prevPos2, curr: currentPos2 }
+    function updateGorillaMovement() {
+      const session = renderer.xr.getSession();
+      if (!session) return;
+
+      scene.updateMatrixWorld(true);
+
+      const hands = [
+        { grip: grip1, curr: handWorldPos1, prev: prevHandPos1 },
+        { grip: grip2, curr: handWorldPos2, prev: prevHandPos2 }
       ];
 
-      let isTouchingGround = false;
+      let isSwingingOnGround = false;
 
-      controllers.forEach((c) => {
-        if (!c.obj) return;
+      // Virtual hand threshold calculated from headset floor level
+      const virtualGroundY = cameraGroup.position.y + 0.6;
 
-        c.obj.getWorldPosition(c.curr);
+      hands.forEach((h) => {
+        if (!h.grip) return;
 
-        // Calculate arm movement delta
-        const delta = new THREE.Vector3().subVectors(c.prev, c.curr);
+        h.grip.getWorldPosition(h.curr);
 
-        // Check if controller hand touches or goes below ground floor (Y = 0)
-        if (c.curr.y <= 0.15) {
-          isTouchingGround = true;
+        // Motion vector relative to hand movement
+        const handDelta = new THREE.Vector3().subVectors(h.prev, h.curr);
 
-          // Push player in opposite direction of hand drag (Gorilla Tag physics)
-          cameraGroup.position.x += delta.x * 2.0;
-          cameraGroup.position.z += delta.z * 2.0;
+        // If hand is pushed below swing threshold
+        if (h.curr.y <= virtualGroundY) {
+          isSwingingOnGround = true;
 
-          // Push upward if slapping down on ground
-          if (delta.y > 0) {
-            playerVelocityY = delta.y * 1.5;
+          // Inverse force push (pushing hand back throws player forward)
+          cameraGroup.position.x += handDelta.x * 2.2;
+          cameraGroup.position.z += handDelta.z * 2.2;
+
+          // Vertical launch on downward slap
+          if (handDelta.y > 0) {
+            playerVelocityY = handDelta.y * 1.6;
           }
         }
 
-        c.prev.copy(c.curr);
+        h.prev.copy(h.curr);
       });
 
-      // Apply Gravity when airborne
-      if (!isTouchingGround && cameraGroup.position.y > floorY) {
+      // Gravity and airborne movement
+      if (!isSwingingOnGround && cameraGroup.position.y > 0) {
         playerVelocityY += gravity;
         cameraGroup.position.y += playerVelocityY;
 
-        // Snap back to floor baseline
-        if (cameraGroup.position.y < floorY) {
-          cameraGroup.position.y = floorY;
+        if (cameraGroup.position.y < 0) {
+          cameraGroup.position.y = 0;
           playerVelocityY = 0;
         }
-      } else if (isTouchingGround) {
-        // Stop falling when touching floor
+      } else if (isSwingingOnGround) {
         if (playerVelocityY < 0) playerVelocityY = 0;
       }
     }
@@ -243,7 +254,7 @@
     }
 
     function render(time) {
-      handleGorillaPhysics();
+      updateGorillaMovement();
 
       if (flashlight) {
         flashlight.intensity = 1.8 + Math.sin(time * 0.02) * 0.3 + (Math.random() < 0.05 ? -0.8 : 0);
