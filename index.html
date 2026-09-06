@@ -95,7 +95,7 @@
     let lastPlayerChunkZ = Infinity;
 
     // Colliders & Entities
-    let colliders = []; // Box & Cylinder Colliders for player/monsters
+    let colliders = []; 
     let eyeMonsters = [];
     let foodApples = [];
     let dreamCrystals = [];
@@ -225,11 +225,24 @@
       daysSurvived = 1;
       isGameOver = false;
       
-      const terrainY = getTerrainHeight(0, 0);
-      cameraGroup.position.set(0, terrainY + 1.6, 0);
+      let spawnX = 0;
+      let spawnZ = 0;
+      cameraGroup.position.set(spawnX, getTerrainHeight(spawnX, spawnZ) + 1.6, spawnZ);
       cameraGroup.rotation.set(0, 0, 0);
 
       updateChunks(true);
+
+      // Unstuck resolution logic
+      let offsetAngle = 0;
+      let offsetRadius = 1.0;
+      while (checkCollision(cameraGroup.position.x, cameraGroup.position.z)) {
+        cameraGroup.position.x = spawnX + Math.cos(offsetAngle) * offsetRadius;
+        cameraGroup.position.z = spawnZ + Math.sin(offsetAngle) * offsetRadius;
+        cameraGroup.position.y = getTerrainHeight(cameraGroup.position.x, cameraGroup.position.z) + 1.6;
+        offsetAngle += 0.5;
+        offsetRadius += 0.2;
+      }
+
       updateWatchScreen();
       update2DUI();
     }
@@ -335,7 +348,6 @@
       const roofMat = new THREE.MeshStandardMaterial({ color: 0x4a3b32, roughness: 0.5 });
       const floorMat = new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.7 });
 
-      // Spawn Walk-in Safe House
       if (Math.abs(pseudoRandom(offsetX, offsetZ)) > 0.65) {
         const hX = offsetX + 20 + Math.abs(pseudoRandom(offsetX, 0)) * (CHUNK_SIZE - 40);
         const hZ = offsetZ + 20 + Math.abs(pseudoRandom(0, offsetZ)) * (CHUNK_SIZE - 40);
@@ -343,7 +355,6 @@
 
         const houseGroup = new THREE.Group();
         
-        // Floor inside house
         const floorGeo = new THREE.PlaneGeometry(7, 7);
         const floor = new THREE.Mesh(floorGeo, floorMat);
         floor.rotation.x = -Math.PI / 2;
@@ -351,42 +362,35 @@
         floor.receiveShadow = true;
         houseGroup.add(floor);
 
-        // Hollow Walls Structure (North, South, East, West with Doorway)
         const wallThickness = 0.3;
         const wallHeight = 4.5;
         const houseWidth = 7;
 
-        // Back Wall (North)
         const backWall = new THREE.Mesh(new THREE.BoxGeometry(houseWidth, wallHeight, wallThickness), houseMat);
         backWall.position.set(0, wallHeight / 2, -houseWidth / 2);
         backWall.castShadow = true; backWall.receiveShadow = true;
         houseGroup.add(backWall);
 
-        // Left Wall (West)
         const leftWall = new THREE.Mesh(new THREE.BoxGeometry(wallThickness, wallHeight, houseWidth), houseMat);
         leftWall.position.set(-houseWidth / 2, wallHeight / 2, 0);
         leftWall.castShadow = true; leftWall.receiveShadow = true;
         houseGroup.add(leftWall);
 
-        // Right Wall (East)
         const rightWall = new THREE.Mesh(new THREE.BoxGeometry(wallThickness, wallHeight, houseWidth), houseMat);
         rightWall.position.set(houseWidth / 2, wallHeight / 2, 0);
         rightWall.castShadow = true; rightWall.receiveShadow = true;
         houseGroup.add(rightWall);
 
-        // Front Wall Left Segment (South)
         const frontWallLeft = new THREE.Mesh(new THREE.BoxGeometry(2.2, wallHeight, wallThickness), houseMat);
         frontWallLeft.position.set(-2.4, wallHeight / 2, houseWidth / 2);
         frontWallLeft.castShadow = true; frontWallLeft.receiveShadow = true;
         houseGroup.add(frontWallLeft);
 
-        // Front Wall Right Segment (South)
         const frontWallRight = new THREE.Mesh(new THREE.BoxGeometry(2.2, wallHeight, wallThickness), houseMat);
         frontWallRight.position.set(2.4, wallHeight / 2, houseWidth / 2);
         frontWallRight.castShadow = true; frontWallRight.receiveShadow = true;
         houseGroup.add(frontWallRight);
 
-        // Roof Ceiling
         const roofGeo = new THREE.ConeGeometry(5.8, 3, 4);
         const roof = new THREE.Mesh(roofGeo, roofMat);
         roof.position.y = wallHeight + 1.5;
@@ -397,19 +401,16 @@
         houseGroup.position.set(hX, hY, hZ);
         group.add(houseGroup);
 
-        // Register Wall Colliders for House
         const hw = houseWidth / 2;
-        colliders.push({ type: 'box', minX: hX - hw, maxX: hX + hw, minZ: hZ - hw - wallThickness, maxZ: hZ - hw + wallThickness, group: group }); // Back
-        colliders.push({ type: 'box', minX: hX - hw - wallThickness, maxX: hX - hw + wallThickness, minZ: hZ - hw, maxZ: hZ + hw, group: group }); // Left
-        colliders.push({ type: 'box', minX: hX + hw - wallThickness, maxX: hX + hw + wallThickness, minZ: hZ - hw, maxZ: hZ + hw, group: group }); // Right
-        colliders.push({ type: 'box', minX: hX - hw, maxX: hX - 1.3, minZ: hZ + hw - wallThickness, maxZ: hZ + hw + wallThickness, group: group }); // Front Left
-        colliders.push({ type: 'box', minX: hX + 1.3, maxX: hX + hw, minZ: hZ + hw - wallThickness, maxZ: hZ + hw + wallThickness, group: group }); // Front Right
+        colliders.push({ type: 'box', minX: hX - hw, maxX: hX + hw, minZ: hZ - hw - wallThickness, maxZ: hZ - hw + wallThickness, group: group });
+        colliders.push({ type: 'box', minX: hX - hw - wallThickness, maxX: hX - hw + wallThickness, minZ: hZ - hw, maxZ: hZ + hw, group: group });
+        colliders.push({ type: 'box', minX: hX + hw - wallThickness, maxX: hX + hw + wallThickness, minZ: hZ - hw, maxZ: hZ + hw, group: group });
+        colliders.push({ type: 'box', minX: hX - hw, maxX: hX - 1.3, minZ: hZ + hw - wallThickness, maxZ: hZ + hw + wallThickness, group: group });
+        colliders.push({ type: 'box', minX: hX + 1.3, maxX: hX + hw, minZ: hZ + hw - wallThickness, maxZ: hZ + hw + wallThickness, group: group });
         
-        // Safe Zone Registration inside house
         colliders.push({ type: 'safezone', x: hX, z: hZ, radius: 3.2, group: group });
       }
 
-      // Organic Trees with Cylindrical Colliders
       const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.9 });
       const foliageMat = new THREE.MeshStandardMaterial({ color: 0x2e5a1c, roughness: 0.6 });
 
@@ -434,11 +435,9 @@
         treeGroup.position.set(tX, tY, tZ);
         group.add(treeGroup);
 
-        // Register Tree Trunk Collider
         colliders.push({ type: 'cylinder', x: tX, z: tZ, radius: 0.5, group: group });
       }
 
-      // Collectible Apples
       for (let i = 0; i < 3; i++) {
         const aX = offsetX + Math.abs(pseudoRandom(offsetX + i, offsetZ)) * CHUNK_SIZE;
         const aZ = offsetZ + Math.abs(pseudoRandom(offsetX, offsetZ + i)) * CHUNK_SIZE;
@@ -454,7 +453,6 @@
         foodApples.push({ mesh: apple, group: group });
       }
 
-      // Collectible Crystals
       if (Math.abs(pseudoRandom(offsetZ, offsetX)) > 0.4) {
         const cX = offsetX + Math.abs(pseudoRandom(offsetX * 2, offsetZ)) * CHUNK_SIZE;
         const cZ = offsetZ + Math.abs(pseudoRandom(offsetX, offsetZ * 2)) * CHUNK_SIZE;
@@ -471,7 +469,6 @@
     }
 
     function disposeGroup(group) {
-      // Remove associated colliders
       colliders = colliders.filter(c => c.group !== group);
 
       group.traverse(child => {
@@ -483,7 +480,6 @@
       });
     }
 
-    // Collision Detection Algorithm for Player Movement
     function checkCollision(targetX, targetZ) {
       for (let col of colliders) {
         if (col.type === 'box') {
@@ -570,7 +566,6 @@
       watchCtx.textAlign = 'center';
       watchCtx.fillText(`DAY ${daysSurvived} SURVIVAL`, 128, 32);
 
-      // Health Bar
       watchCtx.fillStyle = '#440000';
       watchCtx.fillRect(20, 48, 216, 38);
       watchCtx.fillStyle = '#ff2222';
@@ -582,7 +577,6 @@
       watchCtx.font = 'bold 16px sans-serif';
       watchCtx.fillText(`HP: ${Math.round(health)}`, 128, 72);
 
-      // Hunger Bar
       watchCtx.fillStyle = '#443300';
       watchCtx.fillRect(20, 98, 216, 38);
       watchCtx.fillStyle = '#ffaa00';
@@ -591,12 +585,10 @@
       watchCtx.fillStyle = '#ffffff';
       watchCtx.fillText(`HUNGER: ${Math.round(hunger)}`, 128, 122);
 
-      // Crystals Counter
       watchCtx.fillStyle = '#00ffff';
       watchCtx.font = 'bold 16px sans-serif';
       watchCtx.fillText(`CRYSTALS: ${crystalsCollected}`, 128, 168);
 
-      // Status Indicator
       const playerSafe = isInsideSafeZone(cameraGroup.position.x, cameraGroup.position.z);
       watchCtx.fillStyle = playerSafe ? '#00ffcc' : (isNight ? '#ff3333' : '#33ff33');
       watchCtx.font = 'bold 15px sans-serif';
@@ -739,7 +731,6 @@
 
           const nextPos = cameraGroup.position.clone().add(moveVec);
           
-          // Collision Check along X and Z axis independently for sliding
           if (!checkCollision(nextPos.x, cameraGroup.position.z)) {
             cameraGroup.position.x = nextPos.x;
           }
@@ -819,7 +810,6 @@
       const playerPos = cameraGroup.position.clone();
       const playerSafe = isInsideSafeZone(playerPos.x, playerPos.z);
 
-      // Sword Combat & Monster Pathfinding (Cannot enter safe house)
       for (let i = eyeMonsters.length - 1; i >= 0; i--) {
         const eye = eyeMonsters[i];
         const distToSword = currSwordWorldPos.distanceTo(eye.position);
@@ -840,7 +830,7 @@
           const distToPlayer = dirToPlayer.length();
           dirToPlayer.normalize();
 
-          if (!playerSafe) { // Monsters attack only if outside
+          if (!playerSafe) {
             if (distToPlayer <= 1.2) {
               health = Math.max(0, health - 0.5);
               triggerDamageFlash();
@@ -855,7 +845,6 @@
         }
       }
 
-      // Food Apples Collection
       for (let i = foodApples.length - 1; i >= 0; i--) {
         const item = foodApples[i];
         const appleWorldPos = new THREE.Vector3();
@@ -870,7 +859,6 @@
         }
       }
 
-      // Dream Crystal Collection
       for (let i = dreamCrystals.length - 1; i >= 0; i--) {
         const item = dreamCrystals[i];
         const crystalWorldPos = new THREE.Vector3();
