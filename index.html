@@ -63,7 +63,7 @@
 <body>
 
   <button id="vr-button">ENTER REALISTIC VR SURVIVAL</button>
-  <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | CRYSTALS: 0 | DAY 1</div>
+  <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | CRYSTALS: 0 | STAMINA: 100</div>
   <div id="damage-overlay"></div>
 
   <script>
@@ -74,11 +74,16 @@
     // Game Stats
     let health = 100;
     let hunger = 100;
+    let stamina = 100;
     let crystalsCollected = 0;
     let daysSurvived = 1;
     let isNight = false;
     let dayNightTimer = 0;
     let isGameOver = false;
+
+    // Head Bobbing & Physics
+    let walkTimer = 0;
+    let baseEyeHeight = 1.6;
 
     // Wrist Watch HUD & Equipment
     let watchGroup, watchCanvas, watchCtx, watchTexture;
@@ -99,6 +104,7 @@
     let eyeMonsters = [];
     let foodApples = [];
     let dreamCrystals = [];
+    let particleSystems = [];
     let audioCtx = null;
 
     // Motion & VR Controls
@@ -112,6 +118,13 @@
     let canSnapTurn = true;
     const PLAYER_RADIUS = 0.4;
 
+    // Haptic Feedback Helper
+    function triggerHaptic(controller, intensity = 0.5, duration = 100) {
+      if (controller && controller.gamepad && controller.gamepad.hapticActuators && controller.gamepad.hapticActuators.length > 0) {
+        controller.gamepad.hapticActuators[0].pulse(intensity, duration);
+      }
+    }
+
     // Math Noise functions
     function MathNoise(x, z) {
       const p = (x * 12.9898 + z * 78.233);
@@ -121,7 +134,7 @@
     function SmoothNoise(x, z) {
       const corners = (MathNoise(x-1, z-1) + MathNoise(x+1, z-1) + MathNoise(x-1, z+1) + MathNoise(x+1, z+1)) / 16;
       const sides = (MathNoise(x-1, z) + MathNoise(x+1, z) + MathNoise(x, z-1) + MathNoise(x, z+1)) / 8;
-      const center = MathNoise(x, z) / 4;
+      const center = MathNoise(x) / 4;
       return corners + sides + center;
     }
 
@@ -221,24 +234,25 @@
     function resetPlayerPosition() {
       health = 100;
       hunger = 100;
+      stamina = 100;
       crystalsCollected = 0;
       daysSurvived = 1;
       isGameOver = false;
       
       let spawnX = 0;
       let spawnZ = 0;
-      cameraGroup.position.set(spawnX, getTerrainHeight(spawnX, spawnZ) + 1.6, spawnZ);
+      cameraGroup.position.set(spawnX, getTerrainHeight(spawnX, spawnZ) + baseEyeHeight, spawnZ);
       cameraGroup.rotation.set(0, 0, 0);
 
       updateChunks(true);
 
-      // Unstuck resolution logic
+      // Collision safety check on spawn
       let offsetAngle = 0;
       let offsetRadius = 1.0;
       while (checkCollision(cameraGroup.position.x, cameraGroup.position.z)) {
         cameraGroup.position.x = spawnX + Math.cos(offsetAngle) * offsetRadius;
         cameraGroup.position.z = spawnZ + Math.sin(offsetAngle) * offsetRadius;
-        cameraGroup.position.y = getTerrainHeight(cameraGroup.position.x, cameraGroup.position.z) + 1.6;
+        cameraGroup.position.y = getTerrainHeight(cameraGroup.position.x, cameraGroup.position.z) + baseEyeHeight;
         offsetAngle += 0.5;
         offsetRadius += 0.2;
       }
@@ -339,6 +353,31 @@
       return chunkGroup;
     }
 
+    function createParticleBurst(x, y, z, colorHex) {
+      const pCount = 15;
+      const pGeo = new THREE.BufferGeometry();
+      const pPositions = new Float32Array(pCount * 3);
+      const velocities = [];
+
+      for (let i = 0; i < pCount; i++) {
+        pPositions[i * 3] = x;
+        pPositions[i * 3 + 1] = y;
+        pPositions[i * 3 + 2] = z;
+        velocities.push(new THREE.Vector3(
+          (Math.random() - 0.5) * 0.15,
+          Math.random() * 0.15 + 0.05,
+          (Math.random() - 0.5) * 0.15
+        ));
+      }
+
+      pGeo.setAttribute('position', new THREE.BufferAttribute(pPositions, 3));
+      const pMat = new THREE.PointsMaterial({ color: colorHex, size: 0.15, transparent: true, opacity: 1.0 });
+      const pSystem = new THREE.Points(pGeo, pMat);
+      scene.add(pSystem);
+
+      particleSystems.push({ system: pSystem, velocities: velocities, life: 1.0 });
+    }
+
     function populateChunkElements(group, offsetX, offsetZ) {
       const pseudoRandom = (x, z) => {
         return (Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
@@ -398,6 +437,11 @@
         roof.castShadow = true;
         houseGroup.add(roof);
 
+        // Cozy Interior Point Light inside Safe House
+        const interiorLight = new THREE.PointLight(0xffaa44, 1.5, 8);
+        interiorLight.position.set(0, wallHeight - 0.5, 0);
+        houseGroup.add(interiorLight);
+
         houseGroup.position.set(hX, hY, hZ);
         group.add(houseGroup);
 
@@ -411,6 +455,26 @@
         colliders.push({ type: 'safezone', x: hX, z: hZ, radius: 3.2, group: group });
       }
 
+      // Rocks / Boulders
+      const rockMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.9, metalness: 0.1 });
+      for (let i = 0; i < 3; i++) {
+        const rX = offsetX + Math.abs(pseudoRandom(offsetX + i * 7, offsetZ)) * CHUNK_SIZE;
+        const rZ = offsetZ + Math.abs(pseudoRandom(offsetX, offsetZ + i * 7)) * CHUNK_SIZE;
+        const rY = getTerrainHeight(rX, rZ);
+
+        const rockScale = 0.8 + Math.abs(pseudoRandom(rX, rZ)) * 1.2;
+        const rockGeo = new THREE.DodecahedronGeometry(rockScale, 0);
+        const rock = new THREE.Mesh(rockGeo, rockMat);
+        rock.position.set(rX, rY + rockScale * 0.5, rZ);
+        rock.rotation.set(Math.random(), Math.random(), Math.random());
+        rock.castShadow = true;
+        rock.receiveShadow = true;
+
+        group.add(rock);
+        colliders.push({ type: 'cylinder', x: rX, z: rZ, radius: rockScale * 0.8, group: group });
+      }
+
+      // Organic Trees with Cylindrical Colliders
       const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.9 });
       const foliageMat = new THREE.MeshStandardMaterial({ color: 0x2e5a1c, roughness: 0.6 });
 
@@ -463,6 +527,10 @@
         const crystal = new THREE.Mesh(crystalGeo, crystalMat);
         crystal.position.set(cX, cY, cZ);
 
+        // Point Light on Crystal
+        const cLight = new THREE.PointLight(0x00ffff, 0.8, 4);
+        crystal.add(cLight);
+
         group.add(crystal);
         dreamCrystals.push({ mesh: crystal, group: group });
       }
@@ -472,7 +540,7 @@
       colliders = colliders.filter(c => c.group !== group);
 
       group.traverse(child => {
-        if (child.isMesh) {
+        if (child.isMesh || child.isPoints) {
           child.geometry.dispose();
           if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
           else child.material.dispose();
@@ -562,37 +630,49 @@
       watchCtx.strokeRect(6, 6, 244, 244);
 
       watchCtx.fillStyle = '#ffffff';
-      watchCtx.font = 'bold 18px sans-serif';
+      watchCtx.font = 'bold 16px sans-serif';
       watchCtx.textAlign = 'center';
-      watchCtx.fillText(`DAY ${daysSurvived} SURVIVAL`, 128, 32);
+      watchCtx.fillText(`DAY ${daysSurvived} SURVIVAL`, 128, 28);
 
+      // HP Bar
       watchCtx.fillStyle = '#440000';
-      watchCtx.fillRect(20, 48, 216, 38);
+      watchCtx.fillRect(20, 38, 216, 32);
       watchCtx.fillStyle = '#ff2222';
-      watchCtx.fillRect(20, 48, (health / 100) * 216, 38);
+      watchCtx.fillRect(20, 38, (health / 100) * 216, 32);
       watchCtx.strokeStyle = '#ffffff';
       watchCtx.lineWidth = 2;
-      watchCtx.strokeRect(20, 48, 216, 38);
+      watchCtx.strokeRect(20, 38, 216, 32);
       watchCtx.fillStyle = '#ffffff';
-      watchCtx.font = 'bold 16px sans-serif';
-      watchCtx.fillText(`HP: ${Math.round(health)}`, 128, 72);
+      watchCtx.font = 'bold 14px sans-serif';
+      watchCtx.fillText(`HP: ${Math.round(health)}`, 128, 59);
 
+      // Hunger Bar
       watchCtx.fillStyle = '#443300';
-      watchCtx.fillRect(20, 98, 216, 38);
+      watchCtx.fillRect(20, 78, 216, 32);
       watchCtx.fillStyle = '#ffaa00';
-      watchCtx.fillRect(20, 98, (hunger / 100) * 216, 38);
-      watchCtx.strokeRect(20, 98, 216, 38);
+      watchCtx.fillRect(20, 78, (hunger / 100) * 216, 32);
+      watchCtx.strokeRect(20, 78, 216, 32);
       watchCtx.fillStyle = '#ffffff';
-      watchCtx.fillText(`HUNGER: ${Math.round(hunger)}`, 128, 122);
+      watchCtx.fillText(`HUNGER: ${Math.round(hunger)}`, 128, 99);
 
+      // Stamina Bar
+      watchCtx.fillStyle = '#004411';
+      watchCtx.fillRect(20, 118, 216, 32);
+      watchCtx.fillStyle = '#00ff44';
+      watchCtx.fillRect(20, 118, (stamina / 100) * 216, 32);
+      watchCtx.strokeRect(20, 118, 216, 32);
+      watchCtx.fillStyle = '#ffffff';
+      watchCtx.fillText(`STAMINA: ${Math.round(stamina)}`, 128, 139);
+
+      // Crystals Counter
       watchCtx.fillStyle = '#00ffff';
-      watchCtx.font = 'bold 16px sans-serif';
-      watchCtx.fillText(`CRYSTALS: ${crystalsCollected}`, 128, 168);
+      watchCtx.font = 'bold 15px sans-serif';
+      watchCtx.fillText(`CRYSTALS: ${crystalsCollected}`, 128, 178);
 
       const playerSafe = isInsideSafeZone(cameraGroup.position.x, cameraGroup.position.z);
       watchCtx.fillStyle = playerSafe ? '#00ffcc' : (isNight ? '#ff3333' : '#33ff33');
-      watchCtx.font = 'bold 15px sans-serif';
-      watchCtx.fillText(playerSafe ? 'SAFE INSIDE HOUSE' : (isNight ? 'NIGHT: EYE SWARM' : 'DAY: EXPLORE & HARVEST'), 128, 215);
+      watchCtx.font = 'bold 14px sans-serif';
+      watchCtx.fillText(playerSafe ? 'SAFE INSIDE HOUSE' : (isNight ? 'NIGHT: PATROLLING' : 'DAY: EXPLORE'), 128, 215);
 
       if (watchTexture) watchTexture.needsUpdate = true;
     }
@@ -625,16 +705,20 @@
       swordMesh.rotation.set(-Math.PI / 4, 0, 0);
     }
 
+    // Spread-out Monster Spawning System with Detection States
     function spawnEyeMonsters(count) {
       const textureLoader = new THREE.TextureLoader();
       const eyeTexture = textureLoader.load('https://i.postimg.cc/T3JHxXYf/creepy-eye-png-by-solarmaker2005-dhue8bn-fullview-(1).png');
       const mat = new THREE.SpriteMaterial({ map: eyeTexture, transparent: true });
 
+      const playerPos = cameraGroup.position;
+
       for (let i = 0; i < count; i++) {
         const eye = new THREE.Sprite(mat);
-        const playerPos = cameraGroup.position;
-        const angle = Math.random() * Math.PI * 2;
-        const dist = 30 + Math.random() * 25;
+        
+        // Spread evenly across a wide circle (40 to 80 units distance)
+        const angle = (i / count) * Math.PI * 2 + (Math.random() * 0.4 - 0.2);
+        const dist = 40 + Math.random() * 40;
 
         const ex = playerPos.x + Math.cos(angle) * dist;
         const ez = playerPos.z + Math.sin(angle) * dist;
@@ -642,7 +726,21 @@
 
         eye.position.set(ex, ey, ez);
         eye.scale.set(4.5, 4.5, 1);
-        eye.userData = { hp: 3 + Math.floor(daysSurvived * 0.5), speed: 0.07 + Math.random() * 0.03 };
+        
+        const wanderTarget = new THREE.Vector3(
+          ex + (Math.random() - 0.5) * 30,
+          ey,
+          ez + (Math.random() - 0.5) * 30
+        );
+
+        eye.userData = { 
+          hp: 3 + Math.floor(daysSurvived * 0.5), 
+          speed: 0.06 + Math.random() * 0.03,
+          state: 'wandering', // States: 'wandering', 'chasing'
+          wanderTarget: wanderTarget,
+          detectionRadius: 28.0
+        };
+
         scene.add(eye);
         eyeMonsters.push(eye);
       }
@@ -703,6 +801,8 @@
       const session = renderer.xr.getSession();
       if (!session) return;
 
+      let isMoving = false;
+
       for (const source of session.inputSources) {
         if (!source.gamepad) continue;
 
@@ -716,7 +816,18 @@
         }
 
         if (source.handedness === 'left') {
-          const currentSpeed = BASE_MOVE_SPEED + armSwingSpeedBoost;
+          // Stamina influence on movement
+          let speedMultiplier = 1.0;
+          if (armSwingSpeedBoost > 0.03) {
+            if (stamina > 5) {
+              stamina = Math.max(0, stamina - 0.25);
+              speedMultiplier = 1.4;
+            } else {
+              speedMultiplier = 0.7; // Exhaused speed
+            }
+          }
+
+          const currentSpeed = (BASE_MOVE_SPEED + armSwingSpeedBoost) * speedMultiplier;
 
           const forwardDir = new THREE.Vector3();
           camera.getWorldDirection(forwardDir);
@@ -733,13 +844,28 @@
           
           if (!checkCollision(nextPos.x, cameraGroup.position.z)) {
             cameraGroup.position.x = nextPos.x;
+            isMoving = true;
           }
           if (!checkCollision(cameraGroup.position.x, nextPos.z)) {
             cameraGroup.position.z = nextPos.z;
+            isMoving = true;
           }
 
           const terrainY = getTerrainHeight(cameraGroup.position.x, cameraGroup.position.z);
-          cameraGroup.position.y = terrainY + 1.6;
+          
+          // Realistic Head Bobbing while moving
+          if (isMoving) {
+            walkTimer += 0.15;
+            const headBob = Math.sin(walkTimer) * 0.04;
+            cameraGroup.position.y = terrainY + baseEyeHeight + headBob;
+
+            // Subtle Footstep Haptic Feedback
+            if (Math.sin(walkTimer) > 0.98) {
+              triggerHaptic(controller1, 0.15, 30);
+            }
+          } else {
+            cameraGroup.position.y = terrainY + baseEyeHeight;
+          }
 
           updateChunks();
         }
@@ -747,9 +873,15 @@
         if (source.handedness === 'right') {
           if (canSnapTurn && Math.abs(xAxis) > 0.6) {
             cameraGroup.rotation.y -= Math.sign(xAxis) * SNAP_ANGLE;
+            triggerHaptic(controller2, 0.3, 50); // Snap turn haptic
             canSnapTurn = false;
           }
         }
+      }
+
+      // Stamina Recovery
+      if (!isMoving || armSwingSpeedBoost < 0.01) {
+        stamina = Math.min(100, stamina + 0.3);
       }
     }
 
@@ -774,6 +906,9 @@
           ambientLight.intensity = 0.2;
           sunLight.intensity = 0.1;
           flashlight.visible = true;
+
+          triggerHaptic(controller1, 0.8, 300);
+          triggerHaptic(controller2, 0.8, 300);
 
           spawnEyeMonsters(5 + Math.min(10, daysSurvived * 2));
         } else {
@@ -810,13 +945,20 @@
       const playerPos = cameraGroup.position.clone();
       const playerSafe = isInsideSafeZone(playerPos.x, playerPos.z);
 
+      // Monster AI: Patrol -> Detect -> Pursue
       for (let i = eyeMonsters.length - 1; i >= 0; i--) {
         const eye = eyeMonsters[i];
         const distToSword = currSwordWorldPos.distanceTo(eye.position);
+        const distToPlayer = eye.position.distanceTo(playerPos);
 
+        // Sword Hit Detection
         if (distToSword < 2.2 && swordVelocity > 0.035) {
           eye.userData.hp -= 1;
           playSound(260, 'sawtooth', 0.15);
+          
+          // Controller Haptic Shockwave on Hit
+          triggerHaptic(controller2, 0.9, 150);
+          createParticleBurst(eye.position.x, eye.position.y, eye.position.z, 0x00ffff);
 
           const pushDir = new THREE.Vector3().subVectors(eye.position, currSwordWorldPos).normalize();
           eye.position.addScaledVector(pushDir, 3.5);
@@ -826,14 +968,19 @@
             eyeMonsters.splice(i, 1);
           }
         } else {
-          const dirToPlayer = new THREE.Vector3().subVectors(playerPos, eye.position);
-          const distToPlayer = dirToPlayer.length();
-          dirToPlayer.normalize();
+          // AI Behavior logic
+          if (!playerSafe && distToPlayer < eye.userData.detectionRadius) {
+            eye.userData.state = 'chasing';
+          }
 
-          if (!playerSafe) {
+          if (eye.userData.state === 'chasing' && !playerSafe) {
+            // Chase Player
+            const dirToPlayer = new THREE.Vector3().subVectors(playerPos, eye.position).normalize();
             if (distToPlayer <= 1.2) {
               health = Math.max(0, health - 0.5);
               triggerDamageFlash();
+              triggerHaptic(controller1, 0.7, 100);
+              triggerHaptic(controller2, 0.7, 100);
             } else {
               const nextMonsterPos = eye.position.clone().addScaledVector(dirToPlayer, eye.userData.speed);
               if (!checkCollision(nextMonsterPos.x, nextMonsterPos.z)) {
@@ -841,10 +988,28 @@
                 eye.position.y = getTerrainHeight(eye.position.x, eye.position.z) + 2.5;
               }
             }
+          } else {
+            // Patrol / Wander around
+            const dirToTarget = new THREE.Vector3().subVectors(eye.userData.wanderTarget, eye.position);
+            if (dirToTarget.length() < 2.0) {
+              eye.userData.wanderTarget.set(
+                eye.position.x + (Math.random() - 0.5) * 30,
+                eye.position.y,
+                eye.position.z + (Math.random() - 0.5) * 30
+              );
+            } else {
+              dirToTarget.normalize();
+              const nextPatrolPos = eye.position.clone().addScaledVector(dirToTarget, eye.userData.speed * 0.5);
+              if (!checkCollision(nextPatrolPos.x, nextPatrolPos.z)) {
+                eye.position.copy(nextPatrolPos);
+                eye.position.y = getTerrainHeight(eye.position.x, eye.position.z) + 2.5;
+              }
+            }
           }
         }
       }
 
+      // Collect Apples
       for (let i = foodApples.length - 1; i >= 0; i--) {
         const item = foodApples[i];
         const appleWorldPos = new THREE.Vector3();
@@ -854,11 +1019,15 @@
           hunger = Math.min(100, hunger + 30);
           health = Math.min(100, health + 15);
           playSound(520, 'sine', 0.15);
+          triggerHaptic(controller1, 0.4, 80);
+          createParticleBurst(appleWorldPos.x, appleWorldPos.y, appleWorldPos.z, 0xff2222);
+
           item.group.remove(item.mesh);
           foodApples.splice(i, 1);
         }
       }
 
+      // Collect Crystals
       for (let i = dreamCrystals.length - 1; i >= 0; i--) {
         const item = dreamCrystals[i];
         const crystalWorldPos = new THREE.Vector3();
@@ -867,8 +1036,33 @@
         if (playerPos.distanceTo(crystalWorldPos) < 2.0) {
           crystalsCollected++;
           playSound(880, 'triangle', 0.25);
+          triggerHaptic(controller1, 0.6, 120);
+          createParticleBurst(crystalWorldPos.x, crystalWorldPos.y, crystalWorldPos.z, 0x00ffff);
+
           item.group.remove(item.mesh);
           dreamCrystals.splice(i, 1);
+        }
+      }
+
+      // Update Active Particle Systems
+      for (let i = particleSystems.length - 1; i >= 0; i--) {
+        const ps = particleSystems[i];
+        ps.life -= 0.03;
+        
+        const posAttr = ps.system.geometry.attributes.position;
+        for (let j = 0; j < ps.velocities.length; j++) {
+          posAttr.setX(j, posAttr.getX(j) + ps.velocities[j].x);
+          posAttr.setY(j, posAttr.getY(j) + ps.velocities[j].y);
+          posAttr.setZ(j, posAttr.getZ(j) + ps.velocities[j].z);
+        }
+        posAttr.needsUpdate = true;
+        ps.system.material.opacity = ps.life;
+
+        if (ps.life <= 0) {
+          scene.remove(ps.system);
+          ps.system.geometry.dispose();
+          ps.system.material.dispose();
+          particleSystems.splice(i, 1);
         }
       }
     }
@@ -882,6 +1076,8 @@
     function triggerDeath() {
       isGameOver = true;
       playSound(90, 'sawtooth', 0.8);
+      triggerHaptic(controller1, 1.0, 500);
+      triggerHaptic(controller2, 1.0, 500);
       alert(`You perished in the Dreamcore Hills on Day ${daysSurvived}!\nCrystals Collected: ${crystalsCollected}`);
       clearEyeMonsters();
       resetPlayerPosition();
@@ -908,7 +1104,7 @@
     function update2DUI() {
       const ui = document.getElementById('objective-ui');
       const playerSafe = isInsideSafeZone(cameraGroup.position.x, cameraGroup.position.z);
-      ui.innerText = `HEALTH: ${Math.round(health)} | HUNGER: ${Math.round(hunger)} | CRYSTALS: ${crystalsCollected} | DAY ${daysSurvived} (${playerSafe ? 'SAFE HOUSE' : (isNight ? 'NIGHT' : 'DAY')})`;
+      ui.innerText = `HEALTH: ${Math.round(health)} | HUNGER: ${Math.round(hunger)} | STAMINA: ${Math.round(stamina)} | CRYSTALS: ${crystalsCollected} (${playerSafe ? 'SAFE HOUSE' : (isNight ? 'NIGHT' : 'DAY')})`;
       ui.style.color = playerSafe ? '#00ffcc' : (isNight ? '#ff4444' : '#00ffff');
     }
 
