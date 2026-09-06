@@ -27,13 +27,12 @@
       border-radius: 4px;
     }
     #vr-button:hover { background: #ff0000; }
-    #vr-button:disabled { background: #333; border-color: #555; color: #888; cursor: not-allowed; }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
-  <button id="vr-button">CHECKING VR SUPPORT...</button>
+  <button id="vr-button">ENTER VR</button>
 
   <script>
     let scene, camera, renderer, flashlight;
@@ -46,7 +45,7 @@
 
     let playerVelocityY = 0;
     const gravity = -0.006;
-    const handRadius = 0.15; // Arm reach offset
+    const handRadius = 0.15;
 
     init();
 
@@ -80,7 +79,9 @@
       createMonster();
       setupHandVisuals();
 
-      setupVR();
+      // Bind direct click to Enter VR
+      document.getElementById('vr-button').addEventListener('click', onEnterVR);
+
       window.addEventListener('resize', onWindowResize);
       renderer.setAnimationLoop(render);
     }
@@ -115,23 +116,17 @@
             const p = pose.transform.position;
             handCurrPos[handIndex].set(p.x, p.y, p.z);
 
-            // Update red hand mesh to real physical controller space
             handMesh[handIndex].position.copy(handCurrPos[handIndex]);
 
-            // Calculate movement vector between frame poses
             const delta = new THREE.Vector3().subVectors(handPrevPos[handIndex], handCurrPos[handIndex]);
-
-            // Ground plane height collision check (relative to rig height)
             const groundY = cameraGroup.position.y + handRadius;
 
             if (handCurrPos[handIndex].y <= groundY) {
               isAnyHandTouchingGround = true;
 
-              // Impulse propulsion (Opposite vector of hand motion)
               cameraGroup.position.x += delta.x * 2.5;
               cameraGroup.position.z += delta.z * 2.5;
 
-              // Downward slap vertical leap force
               if (delta.y > 0) {
                 playerVelocityY = delta.y * 1.8;
               }
@@ -143,7 +138,6 @@
         }
       }
 
-      // Physics Gravity System
       if (!isAnyHandTouchingGround && cameraGroup.position.y > 0) {
         playerVelocityY += gravity;
         cameraGroup.position.y += playerVelocityY;
@@ -159,4 +153,96 @@
 
     function createEnvironment() {
       const floorGeo = new THREE.PlaneGeometry(30, 100);
-      const floorMat = new THREE.MeshStandardMaterial({ color: 0x11111
+      const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
+      const floor = new THREE.Mesh(floorGeo, floorMat);
+      floor.rotation.x = -Math.PI / 2;
+      scene.add(floor);
+
+      const ceiling = floor.clone();
+      ceiling.position.y = 5;
+      ceiling.rotation.x = Math.PI / 2;
+      scene.add(ceiling);
+
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
+      
+      const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(100, 5), wallMat);
+      leftWall.position.set(-15, 2.5, 0);
+      leftWall.rotation.y = Math.PI / 2;
+      scene.add(leftWall);
+
+      const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(100, 5), wallMat);
+      rightWall.position.set(15, 2.5, 0);
+      rightWall.rotation.y = -Math.PI / 2;
+      scene.add(rightWall);
+    }
+
+    function createMonster() {
+      const monsterGroup = new THREE.Group();
+
+      const bodyGeo = new THREE.CylinderGeometry(0.4, 0.2, 3, 8);
+      const monsterMat = new THREE.MeshBasicMaterial({ color: 0x050505 });
+      const body = new THREE.Mesh(bodyGeo, monsterMat);
+      body.position.y = 1.5;
+      monsterGroup.add(body);
+
+      const eyeGeo = new THREE.SphereGeometry(0.05, 8, 8);
+      const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+      
+      const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+      leftEye.position.set(-0.15, 2.5, 0.3);
+      
+      const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+      rightEye.position.set(0.15, 2.5, 0.3);
+
+      monsterGroup.add(leftEye);
+      monsterGroup.add(rightEye);
+
+      monsterGroup.position.set(0, 0, -25);
+      scene.add(monsterGroup);
+      monster = monsterGroup;
+    }
+
+    function onEnterVR() {
+      if (!('xr' in navigator)) {
+        alert("WebXR API not detected. Make sure you are using an HTTPS URL inside your VR headset browser.");
+        return;
+      }
+
+      navigator.xr.requestSession('immersive-vr', {
+        optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+      }).then((session) => {
+        renderer.xr.setSession(session);
+        document.getElementById('vr-button').style.display = 'none';
+
+        session.addEventListener('end', () => {
+          document.getElementById('vr-button').style.display = 'block';
+        });
+      }).catch((err) => {
+        console.error("VR Session Failed:", err);
+        alert("Could not open VR session. Ensure the URL starts with https://");
+      });
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function render(timestamp, frame) {
+      updateGorillaLocomotion(timestamp, frame);
+
+      if (flashlight) {
+        flashlight.intensity = 1.8 + Math.sin(timestamp * 0.02) * 0.3 + (Math.random() < 0.05 ? -0.8 : 0);
+      }
+
+      if (monster && monster.position.z < cameraGroup.position.z) {
+        monster.position.z += 0.01;
+        monster.position.x = Math.sin(timestamp * 0.003) * 0.8;
+      }
+
+      renderer.render(scene, camera);
+    }
+  </script>
+</body>
+</html>
