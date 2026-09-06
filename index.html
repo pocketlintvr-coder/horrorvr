@@ -68,7 +68,7 @@
   <script>
     let scene, camera, renderer, cameraGroup;
     let flashlight, ambientLight, flickeringLight, sunLight;
-    let monster;
+    let monster, level2Monster;
     let exitDoor;
     let vrObjectiveMesh, vrCanvas, vrCtx;
     let wallMeshes = [];
@@ -79,6 +79,11 @@
     let currentLevel = 1; // Level 1 = Backrooms, Level 2 = Dreamcore Hills
     let level1Objects = [];
     let level2Objects = [];
+
+    // Level 2 Sky & Day/Night Cycle State
+    let daySkyTexture, nightSkyTexture;
+    let isNight = false;
+    let dayNightTimer = 0;
 
     // AI Variables
     let monsterState = 'PATROL';
@@ -183,6 +188,7 @@
       buildMaze();
       buildDreamcoreLevel();
       createMonster();
+      createLevel2Monster();
       setupControllers();
       createVrObjectiveText();
       pickRandomPatrolTarget();
@@ -237,7 +243,7 @@
         vrCtx.font = '22px sans-serif';
         vrCtx.textAlign = 'center';
         vrCtx.fillText('LEVEL 2: DREAMCORE HILLS', 256, 50);
-        vrCtx.fillText('Explore the endless liminal space...', 256, 85);
+        vrCtx.fillText(isNight ? 'Beware the Night Eye...' : 'Explore the endless liminal space...', 256, 85);
       }
 
       if (vrObjectiveMesh) {
@@ -254,8 +260,8 @@
           ui.style.color = '#00ff00';
         }
       } else {
-        ui.innerText = 'LEVEL 2: Welcome to the Dreamcore Liminal Hills.';
-        ui.style.color = '#88ffff';
+        ui.innerText = isNight ? 'LEVEL 2: NIGHTTIME - The Giant Eye Approaches!' : 'LEVEL 2: Welcome to the Dreamcore Liminal Hills.';
+        ui.style.color = isNight ? '#ff4444' : '#88ffff';
       }
     }
 
@@ -263,7 +269,8 @@
       if (currentLevel === 1) {
         cameraGroup.position.set(1 * CELL_SIZE, 0, 1 * CELL_SIZE);
       } else {
-        cameraGroup.position.set(0, 2, 0);
+        const terrainY = getTerrainHeight(0, 0);
+        cameraGroup.position.set(0, terrainY + 1.6, 0);
       }
       cameraGroup.rotation.set(0, 0, 0);
     }
@@ -370,16 +377,20 @@
       const overlay = document.getElementById('jumpscare-overlay');
       overlay.style.display = 'block';
 
-      monster.scale.set(1.2, 1.5, 1);
+      const activeMonster = (currentLevel === 2) ? level2Monster : monster;
 
-      const viewDir = new THREE.Vector3();
-      camera.getWorldDirection(viewDir);
-      
-      const headPos = new THREE.Vector3();
-      camera.getWorldPosition(headPos);
+      if (activeMonster) {
+        activeMonster.scale.set(1.2, 1.5, 1);
 
-      monster.position.copy(headPos).addScaledVector(viewDir, 1.0);
-      monster.position.y = headPos.y - 0.2;
+        const viewDir = new THREE.Vector3();
+        camera.getWorldDirection(viewDir);
+
+        const headPos = new THREE.Vector3();
+        camera.getWorldPosition(headPos);
+
+        activeMonster.position.copy(headPos).addScaledVector(viewDir, 1.0);
+        activeMonster.position.y = headPos.y - 0.2;
+      }
 
       let shakeFrames = 0;
       const shakeInterval = setInterval(() => {
@@ -391,7 +402,9 @@
           clearInterval(shakeInterval);
           overlay.style.display = 'none';
           resetPlayerPosition();
-          resetMonsterPosition();
+          if (currentLevel === 1) {
+            resetMonsterPosition();
+          }
           isJumpscaring = false;
         }
       }, 30);
@@ -409,12 +422,18 @@
       level2Objects.forEach(obj => obj.visible = true);
       sunLight.visible = true;
 
-      // Update Environment Lighting & Fog for Dreamcore Sky
-      scene.background = new THREE.Color(0x60adff);
-      scene.fog = new THREE.FogExp2(0x87ceeb, 0.005);
+      // Set Day Texture and Environment Lighting
+      scene.background = daySkyTexture;
+      scene.fog = new THREE.FogExp2(0xaaccff, 0.005);
       ambientLight.color.setHex(0xffffff);
-      ambientLight.intensity = 0.8;
+      ambientLight.intensity = 0.9;
       flashlight.visible = false;
+
+      // Ensure Creepy Eye monster is hidden initially (Daytime)
+      if (level2Monster) level2Monster.visible = false;
+
+      dayNightTimer = 0;
+      isNight = false;
 
       resetPlayerPosition();
       updateVrObjectiveUI();
@@ -496,7 +515,23 @@
       }
     }
 
+    // Helper for computing terrain elevation height at any (x, z)
+    function getTerrainHeight(x, z) {
+      return Math.sin(x * 0.05) * Math.cos(z * 0.05) * 6 + Math.sin(x * 0.02) * 8;
+    }
+
     function buildDreamcoreLevel() {
+      const textureLoader = new THREE.TextureLoader();
+
+      // Load requested Custom Grass, Day Sky, and Night Sky Textures
+      const customGrassTexture = textureLoader.load('https://i.postimg.cc/C1PN1FWR/Getty-Images-1407861824-ee2a308b7f134e509f4d3463653d6cfe.jpg');
+      customGrassTexture.wrapS = THREE.RepeatWrapping;
+      customGrassTexture.wrapT = THREE.RepeatWrapping;
+      customGrassTexture.repeat.set(20, 20);
+
+      daySkyTexture = textureLoader.load('https://i.postimg.cc/BZzpfnTN/images-(7).jpg');
+      nightSkyTexture = textureLoader.load('https://i.postimg.cc/FKGbWrFs/images-(8).jpg');
+
       // Create Dreamcore Rolling Green Hills Terrain
       const terrainGeo = new THREE.PlaneGeometry(300, 300, 120, 120);
       terrainGeo.rotateX(-Math.PI / 2);
@@ -505,31 +540,32 @@
       for (let i = 0; i < pos.count; i++) {
         const x = pos.getX(i);
         const z = pos.getZ(i);
-        const y = Math.sin(x * 0.05) * Math.cos(z * 0.05) * 6 + Math.sin(x * 0.02) * 8;
-        pos.setY(i, y);
+        pos.setY(i, getTerrainHeight(x, z));
       }
       terrainGeo.computeVertexNormals();
 
-      const grassMat = new THREE.MeshStandardMaterial({ color: 0x48c02c, roughness: 0.9 });
+      const grassMat = new THREE.MeshStandardMaterial({ map: customGrassTexture, roughness: 0.8 });
       const terrain = new THREE.Mesh(terrainGeo, grassMat);
       terrain.visible = false;
       scene.add(terrain);
       level2Objects.push(terrain);
 
-      // Add Liminal Surreal Houses & Water Towers on Hills
+      // Add Liminal Surreal Houses (Anchored flush to undulating terrain)
       const houseMat = new THREE.MeshStandardMaterial({ color: 0xfffdd0, roughness: 0.5 });
       const roofMat = new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.6 });
       const roadMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
 
-      const housePositions = [
-        { x: -30, z: -40, y: 5 },
-        { x: 50, z: -60, y: 10 },
-        { x: -20, z: 60, y: 4 },
-        { x: 60, z: 40, y: 8 }
+      const houseXZPositions = [
+        { x: -30, z: -40 },
+        { x: 50, z: -60 },
+        { x: -20, z: 60 },
+        { x: 60, z: 40 }
       ];
 
-      housePositions.forEach(p => {
+      houseXZPositions.forEach(p => {
+        const terrainY = getTerrainHeight(p.x, p.z);
         const houseGroup = new THREE.Group();
+
         const bodyGeo = new THREE.BoxGeometry(6, 6, 6);
         const houseBody = new THREE.Mesh(bodyGeo, houseMat);
         houseBody.position.y = 3;
@@ -541,7 +577,7 @@
 
         houseGroup.add(houseBody);
         houseGroup.add(roof);
-        houseGroup.position.set(p.x, p.y, p.z);
+        houseGroup.position.set(p.x, terrainY, p.z);
         houseGroup.visible = false;
         scene.add(houseGroup);
         level2Objects.push(houseGroup);
@@ -554,8 +590,9 @@
       for (let i = 0; i < roadPos.count; i++) {
         const x = roadPos.getX(i);
         const z = roadPos.getZ(i);
-        roadPos.setX(i, x + Math.sin(z * 0.04) * 15);
-        roadPos.setY(i, Math.sin((x + Math.sin(z * 0.04) * 15) * 0.05) * Math.cos(z * 0.05) * 6 + Math.sin((x + Math.sin(z * 0.04) * 15) * 0.02) * 8 + 0.1);
+        const actualX = x + Math.sin(z * 0.04) * 15;
+        roadPos.setX(i, actualX);
+        roadPos.setY(i, getTerrainHeight(actualX, z) + 0.1);
       }
       roadGeo.computeVertexNormals();
 
@@ -573,6 +610,83 @@
       monster = new THREE.Sprite(mat);
       resetMonsterPosition();
       scene.add(monster);
+    }
+
+    function createLevel2Monster() {
+      const textureLoader = new THREE.TextureLoader();
+      const eyeTexture = textureLoader.load('https://i.postimg.cc/T3JHxXYf/creepy-eye-png-by-solarmaker2005-dhue8bn-fullview-(1).png');
+
+      const mat = new THREE.SpriteMaterial({ map: eyeTexture, transparent: true });
+      level2Monster = new THREE.Sprite(mat);
+      level2Monster.scale.set(6, 6, 1);
+      level2Monster.visible = false;
+      scene.add(level2Monster);
+    }
+
+    function updateLevel2DayNight(deltaTime) {
+      if (currentLevel !== 2) return;
+
+      dayNightTimer += deltaTime;
+
+      if (dayNightTimer >= 30) {
+        dayNightTimer = 0;
+        isNight = !isNight;
+
+        if (isNight) {
+          scene.background = nightSkyTexture;
+          scene.fog.color.setHex(0x050515);
+          scene.fog.density = 0.015;
+          ambientLight.color.setHex(0x333355);
+          ambientLight.intensity = 0.25;
+          sunLight.intensity = 0.2;
+          flashlight.visible = true;
+
+          // Spawn Creepy Eye Monster nearby during Nighttime
+          if (level2Monster) {
+            const playerPos = cameraGroup.position.clone();
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 35;
+            const eyeX = playerPos.x + Math.cos(angle) * dist;
+            const eyeZ = playerPos.z + Math.sin(angle) * dist;
+            const eyeY = getTerrainHeight(eyeX, eyeZ) + 3.0;
+
+            level2Monster.position.set(eyeX, eyeY, eyeZ);
+            level2Monster.scale.set(6, 6, 1);
+            level2Monster.visible = true;
+          }
+        } else {
+          scene.background = daySkyTexture;
+          scene.fog.color.setHex(0xaaccff);
+          scene.fog.density = 0.005;
+          ambientLight.color.setHex(0xffffff);
+          ambientLight.intensity = 0.9;
+          sunLight.intensity = 1.2;
+          flashlight.visible = false;
+
+          if (level2Monster) {
+            level2Monster.visible = false;
+          }
+        }
+
+        updateVrObjectiveUI();
+      }
+
+      // Level 2 Eye Monster Chase Mechanics during Nighttime
+      if (isNight && level2Monster && !isJumpscaring) {
+        const playerPos = cameraGroup.position.clone();
+        const eyePos = level2Monster.position.clone();
+
+        const dirToPlayer = new THREE.Vector3().subVectors(playerPos, eyePos);
+        const distToPlayer = dirToPlayer.length();
+        dirToPlayer.normalize();
+
+        if (distToPlayer <= JUMPSCARE_DISTANCE + 0.5) {
+          triggerJumpscare();
+        } else {
+          level2Monster.position.addScaledVector(dirToPlayer, 0.085);
+          level2Monster.position.y = getTerrainHeight(level2Monster.position.x, level2Monster.position.z) + 3.0;
+        }
+      }
     }
 
     function setupControllers() {
@@ -688,7 +802,7 @@
             }
           } else {
             // Level 2 continuous terrain movement height match
-            const terrainY = Math.sin(nextPos.x * 0.05) * Math.cos(nextPos.z * 0.05) * 6 + Math.sin(nextPos.x * 0.02) * 8;
+            const terrainY = getTerrainHeight(nextPos.x, nextPos.z);
             nextPos.y = terrainY + 1.6;
             cameraGroup.position.copy(nextPos);
           }
@@ -730,7 +844,13 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
+    let lastClockTime = performance.now();
+
     function render(timestamp) {
+      const now = performance.now();
+      const deltaTime = (now - lastClockTime) / 1000;
+      lastClockTime = now;
+
       processThumbstickLocomotion();
 
       if (currentLevel === 1) {
@@ -745,6 +865,8 @@
         if (flickeringLight) {
           flickeringLight.intensity = 1.0 + Math.sin(timestamp * 0.015) * 0.8 + (Math.random() < 0.08 ? -1.2 : 0);
         }
+      } else if (currentLevel === 2) {
+        updateLevel2DayNight(deltaTime);
       }
 
       renderer.render(scene, camera);
