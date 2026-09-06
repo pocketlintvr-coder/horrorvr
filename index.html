@@ -50,12 +50,11 @@
     const handPrevPos = [new THREE.Vector3(), new THREE.Vector3()];
     const handCurrPos = [new THREE.Vector3(), new THREE.Vector3()];
 
-    // DIRECT LOCOMOTION PHYSICS
+    // LOCOMOTION TUNING (PURE HAND PROPULSION)
     const playerVelocity = new THREE.Vector3(0, 0, 0);
-    const gravity = -0.008;
-    const forwardMultiplier = 3.8; // High forward push
-    const upwardMultiplier = 0.2;  // Minimized upward bounce
-    const friction = 0.85;         // Quick stopping friction
+    const forwardMultiplier = 4.5; // Direct arm-swing forward push
+    const upwardMultiplier = 0.25; // Controlled vertical pop
+    const friction = 0.82;         // Snappy ground friction
 
     init();
 
@@ -211,6 +210,7 @@
       grip1 = renderer.xr.getControllerGrip(0);
       grip2 = renderer.xr.getControllerGrip(1);
 
+      // Hand Hitbox Geometry
       const handGeo = new THREE.SphereGeometry(0.18, 16, 16);
       const handMat = new THREE.MeshStandardMaterial({ color: 0xcc1111, roughness: 0.3, emissive: 0x220000 });
 
@@ -244,19 +244,18 @@
 
         const handDelta = new THREE.Vector3().subVectors(handPrevPos[i], handCurrPos[i]);
 
-        // FLOOR CONTACT CHECK (Triggers whenever hand sphere enters lower floor threshold)
-        if (handCurrPos[i].y <= cameraGroup.position.y + 0.35) {
+        // STRICT HAND HITBOX FLOOR CHECK (Y <= 0.18 based on hand sphere radius)
+        if (handCurrPos[i].y <= 0.18) {
           
           const deltaForward = handDelta.dot(forwardDir);
           const deltaRight = handDelta.dot(rightDir);
 
-          // Pushing arm back launches body forward
-          if (handDelta.length() > 0.002) {
+          if (handDelta.length() > 0.0015) {
             playerVelocity.x += (forwardDir.x * deltaForward + rightDir.x * deltaRight) * forwardMultiplier;
             playerVelocity.z += (forwardDir.z * deltaForward + rightDir.z * deltaRight) * forwardMultiplier;
 
             if (handDelta.y > 0) {
-              playerVelocity.y += Math.min(handDelta.y * upwardMultiplier, 0.02);
+              playerVelocity.y += handDelta.y * upwardMultiplier;
             }
           }
         }
@@ -264,19 +263,14 @@
         handPrevPos[i].copy(handCurrPos[i]);
       }
 
-      // APPLY CONTINUOUS MOVEMENT
+      // APPLY MOVEMENT
       cameraGroup.position.add(playerVelocity);
-
-      if (cameraGroup.position.y > 0) {
-        playerVelocity.y += gravity;
-      } else {
-        cameraGroup.position.y = 0;
-        playerVelocity.y = 0;
-      }
 
       playerVelocity.x *= friction;
       playerVelocity.z *= friction;
+      playerVelocity.y *= friction;
 
+      // MAP BOUNDS
       cameraGroup.position.x = Math.max(-5.2, Math.min(5.2, cameraGroup.position.x));
       cameraGroup.position.z = Math.max(-35, Math.min(8, cameraGroup.position.z));
     }
