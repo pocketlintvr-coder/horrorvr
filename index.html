@@ -83,6 +83,12 @@
     let dayNightTimer = 0;
     let isGameOver = false;
 
+    // Upgrades System
+    let damageMultiplier = 1;
+    let speedUpgradeLevel = 0;
+    let speedBoostTimer = 0;
+    let upgradeAltars = [];
+
     // Wrist Watch HUD & Equipment
     let watchGroup, watchCanvas, watchCtx, watchTexture;
     let swordMesh;
@@ -113,6 +119,7 @@
     const BASE_MOVE_SPEED = 0.09;
     const SNAP_ANGLE = Math.PI / 4;
     let canSnapTurn = true;
+    let canUseCrystal = true;
     const PLAYER_RADIUS = 0.4;
 
     // Math Noise functions
@@ -226,6 +233,9 @@
       hunger = 100;
       crystalsCollected = 0;
       daysSurvived = 1;
+      damageMultiplier = 1;
+      speedUpgradeLevel = 0;
+      speedBoostTimer = 0;
       isGameOver = false;
       
       let spawnX = 0;
@@ -413,8 +423,23 @@
         roof.castShadow = true;
         houseGroup.add(roof);
 
+        // Upgrade Altar inside house
+        const altarGeo = new THREE.CylinderGeometry(0.5, 0.6, 1.0, 8);
+        const altarMat = new THREE.MeshStandardMaterial({ color: 0x112244, roughness: 0.3, metalness: 0.8 });
+        const altar = new THREE.Mesh(altarGeo, altarMat);
+        altar.position.set(0, 0.5, -2);
+        houseGroup.add(altar);
+
+        const orbGeo = new THREE.SphereGeometry(0.3, 16, 16);
+        const orbMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.8 });
+        const orb = new THREE.Mesh(orbGeo, orbMat);
+        orb.position.set(0, 1.3, -2);
+        houseGroup.add(orb);
+
         houseGroup.position.set(hX, hY, hZ);
         group.add(houseGroup);
+
+        upgradeAltars.push({ mesh: orb, x: hX, z: hZ - 2, group: group });
 
         const hw = houseWidth / 2;
         colliders.push({ type: 'box', minX: hX - hw, maxX: hX + hw, minZ: hZ - hw - wallThickness, maxZ: hZ - hw + wallThickness, group: group });
@@ -485,6 +510,7 @@
 
     function disposeGroup(group) {
       colliders = colliders.filter(c => c.group !== group);
+      upgradeAltars = upgradeAltars.filter(a => a.group !== group);
 
       group.traverse(child => {
         if (child.isMesh) {
@@ -579,35 +605,39 @@
       watchCtx.fillStyle = '#ffffff';
       watchCtx.font = 'bold 18px sans-serif';
       watchCtx.textAlign = 'center';
-      watchCtx.fillText(`DAY ${daysSurvived} SURVIVAL`, 128, 32);
+      watchCtx.fillText(`DAY ${daysSurvived} SURVIVAL`, 128, 30);
 
       watchCtx.fillStyle = '#440000';
-      watchCtx.fillRect(20, 48, 216, 38);
+      watchCtx.fillRect(20, 42, 216, 32);
       watchCtx.fillStyle = '#ff2222';
-      watchCtx.fillRect(20, 48, (health / 100) * 216, 38);
+      watchCtx.fillRect(20, 42, (health / 100) * 216, 32);
       watchCtx.strokeStyle = '#ffffff';
       watchCtx.lineWidth = 2;
-      watchCtx.strokeRect(20, 48, 216, 38);
+      watchCtx.strokeRect(20, 42, 216, 32);
       watchCtx.fillStyle = '#ffffff';
-      watchCtx.font = 'bold 16px sans-serif';
-      watchCtx.fillText(`HP: ${Math.round(health)}`, 128, 72);
+      watchCtx.font = 'bold 15px sans-serif';
+      watchCtx.fillText(`HP: ${Math.round(health)}`, 128, 63);
 
       watchCtx.fillStyle = '#443300';
-      watchCtx.fillRect(20, 98, 216, 38);
+      watchCtx.fillRect(20, 82, 216, 32);
       watchCtx.fillStyle = '#ffaa00';
-      watchCtx.fillRect(20, 98, (hunger / 100) * 216, 38);
-      watchCtx.strokeRect(20, 98, 216, 38);
+      watchCtx.fillRect(20, 82, (hunger / 100) * 216, 32);
+      watchCtx.strokeRect(20, 82, 216, 32);
       watchCtx.fillStyle = '#ffffff';
-      watchCtx.fillText(`HUNGER: ${Math.round(hunger)}`, 128, 122);
+      watchCtx.fillText(`HUNGER: ${Math.round(hunger)}`, 128, 103);
 
       watchCtx.fillStyle = '#00ffff';
-      watchCtx.font = 'bold 16px sans-serif';
-      watchCtx.fillText(`CRYSTALS: ${crystalsCollected}`, 128, 168);
+      watchCtx.font = 'bold 15px sans-serif';
+      watchCtx.fillText(`CRYSTALS: ${crystalsCollected}`, 128, 138);
+
+      watchCtx.fillStyle = '#ffff00';
+      watchCtx.font = 'bold 13px sans-serif';
+      watchCtx.fillText(`PWR: x${damageMultiplier.toFixed(1)} | SPD: +${speedUpgradeLevel * 20}%`, 128, 160);
 
       const playerSafe = isInsideSafeZone(cameraGroup.position.x, cameraGroup.position.z);
       watchCtx.fillStyle = playerSafe ? '#00ffcc' : (isNight ? '#ff3333' : '#33ff33');
-      watchCtx.font = 'bold 15px sans-serif';
-      watchCtx.fillText(playerSafe ? 'SAFE INSIDE HOUSE' : (isNight ? 'NIGHT: EYE SWARM' : 'DAY: EXPLORE & HARVEST'), 128, 215);
+      watchCtx.font = 'bold 13px sans-serif';
+      watchCtx.fillText(playerSafe ? 'ALTAR: ALT-ACTION UPGRADE' : (isNight ? 'NIGHT: EYE SWARM' : 'A-BTN: HEAL/SPEED BOOST'), 128, 205);
 
       if (watchTexture) watchTexture.needsUpdate = true;
     }
@@ -725,6 +755,16 @@
       prevController2Pos.copy(currPos2);
     }
 
+    function useCrystalConsumable() {
+      if (crystalsCollected > 0) {
+        crystalsCollected--;
+        health = Math.min(100, health + 50);
+        speedBoostTimer = 12.0; // 12 seconds of speed boost
+        playSound(1050, 'triangle', 0.4);
+        triggerHaptic('both', 0.8, 200);
+      }
+    }
+
     function processThumbstickLocomotion() {
       if (isGameOver) return;
 
@@ -737,6 +777,17 @@
         if (!source.gamepad) continue;
 
         const axes = source.gamepad.axes;
+        const buttons = source.gamepad.buttons;
+
+        // Button A or Trigger / Grip action to consume Crystal for immediate Heal/Boost
+        const primaryButtonPressed = buttons[4] && buttons[4].pressed || (buttons[0] && buttons[0].pressed && source.handedness === 'right');
+        if (primaryButtonPressed && canUseCrystal) {
+          useCrystalConsumable();
+          canUseCrystal = false;
+        } else if (!primaryButtonPressed) {
+          canUseCrystal = true;
+        }
+
         const xAxis = axes[2] !== undefined ? axes[2] : axes[0];
         const yAxis = axes[3] !== undefined ? axes[3] : axes[1];
 
@@ -746,7 +797,8 @@
         }
 
         if (source.handedness === 'left') {
-          const currentSpeed = BASE_MOVE_SPEED + armSwingSpeedBoost;
+          let multiplier = (1 + speedUpgradeLevel * 0.2) * (speedBoostTimer > 0 ? 1.5 : 1.0);
+          const currentSpeed = (BASE_MOVE_SPEED + armSwingSpeedBoost) * multiplier;
 
           const forwardDir = new THREE.Vector3();
           camera.getWorldDirection(forwardDir);
@@ -786,6 +838,10 @@
 
     function updateDayNightCycle(deltaTime) {
       dayNightTimer += deltaTime;
+
+      if (speedBoostTimer > 0) {
+        speedBoostTimer = Math.max(0, speedBoostTimer - deltaTime);
+      }
 
       hunger = Math.max(0, hunger - deltaTime * 0.7);
       if (hunger <= 0) {
@@ -847,12 +903,26 @@
       const playerPos = cameraGroup.position.clone();
       const playerSafe = isInsideSafeZone(playerPos.x, playerPos.z);
 
+      // Upgrade Altar interactions inside house
+      upgradeAltars.forEach(altar => {
+        const dist = Math.hypot(playerPos.x - altar.x, playerPos.z - altar.z);
+        if (dist < 1.8) {
+          if (crystalsCollected >= 2) {
+            crystalsCollected -= 2;
+            damageMultiplier += 0.5;
+            speedUpgradeLevel += 1;
+            playSound(1200, 'sine', 0.5);
+            triggerHaptic('both', 0.9, 300);
+          }
+        }
+      });
+
       for (let i = eyeMonsters.length - 1; i >= 0; i--) {
         const eye = eyeMonsters[i];
         const distToSword = currSwordWorldPos.distanceTo(eye.position);
 
         if (distToSword < 2.2 && swordVelocity > 0.035) {
-          eye.userData.hp -= 1;
+          eye.userData.hp -= 1 * damageMultiplier;
           playSound(260, 'sawtooth', 0.15);
           triggerHaptic('right', 0.9, 120);
 
@@ -967,7 +1037,7 @@
     function update2DUI() {
       const ui = document.getElementById('objective-ui');
       const playerSafe = isInsideSafeZone(cameraGroup.position.x, cameraGroup.position.z);
-      ui.innerText = `HEALTH: ${Math.round(health)} | HUNGER: ${Math.round(hunger)} | CRYSTALS: ${crystalsCollected} | DAY ${daysSurvived} (${playerSafe ? 'SAFE HOUSE' : (isNight ? 'NIGHT' : 'DAY')})`;
+      ui.innerText = `HEALTH: ${Math.round(health)} | HUNGER: ${Math.round(hunger)} | CRYSTALS: ${crystalsCollected} (A-Btn: Consume | Altar: Upgrade) | DAY ${daysSurvived}`;
       ui.style.color = playerSafe ? '#00ffcc' : (isNight ? '#ff4444' : '#00ffff');
     }
 
@@ -1022,6 +1092,10 @@
       dreamCrystals.forEach(c => {
         c.mesh.rotation.y += 0.025;
         c.mesh.position.y += Math.sin(now * 0.003) * 0.0015;
+      });
+
+      upgradeAltars.forEach(a => {
+        a.mesh.rotation.y += 0.03;
       });
 
       foodApples.forEach(a => a.mesh.rotation.y += 0.015);
