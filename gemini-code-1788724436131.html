@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VR Horror Experience</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #000;
+      font-family: sans-serif;
+    }
+    #vr-button {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 14px 28px;
+      background: #8b0000;
+      color: #fff;
+      border: 1px solid #ff0000;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      z-index: 999;
+      border-radius: 4px;
+    }
+    #vr-button:hover {
+      background: #ff0000;
+    }
+    #vr-button:disabled {
+      background: #333;
+      border-color: #555;
+      color: #888;
+      cursor: not-allowed;
+    }
+  </style>
+  <!-- Three.js Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+  <button id="vr-button">CHECKING VR SUPPORT...</button>
+
+  <script>
+    let scene, camera, renderer, flashlight;
+    let monster;
+
+    init();
+
+    function init() {
+      // 1. Create Scene & Fog for horror atmosphere
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x020202);
+      scene.fog = new THREE.FogExp2(0x020202, 0.15);
+
+      // 2. Camera Setup
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+      camera.position.set(0, 1.6, 0); // Average eye level in meters
+
+      // 3. Renderer Setup with WebXR Enabled
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      // 4. Lighting (Minimal Ambient + Player Flashlight)
+      const ambientLight = new THREE.AmbientLight(0x050508, 0.2);
+      scene.add(ambientLight);
+
+      flashlight = new THREE.SpotLight(0xffffff, 2, 15, Math.PI / 6, 0.5, 1);
+      flashlight.position.set(0, 1.6, 0);
+      
+      // Target for flashlight direction
+      const lightTarget = new THREE.Object3D();
+      lightTarget.position.set(0, 1.6, -5);
+      scene.add(lightTarget);
+      flashlight.target = lightTarget;
+
+      // Attach flashlight to camera
+      camera.add(flashlight);
+      camera.add(lightTarget);
+      scene.add(camera);
+
+      // 5. Environment (Creepy Dark Hallway)
+      createEnvironment();
+
+      // 6. Spawn Horror Entity
+      createMonster();
+
+      // 7. WebXR Setup
+      setupVR();
+
+      // 8. Window Resize Listener
+      window.addEventListener('resize', onWindowResize);
+
+      // 9. WebXR Animation Loop
+      renderer.setAnimationLoop(render);
+    }
+
+    function createEnvironment() {
+      // Floor
+      const floorGeo = new THREE.PlaneGeometry(10, 50);
+      const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
+      const floor = new THREE.Mesh(floorGeo, floorMat);
+      floor.rotation.x = -Math.PI / 2;
+      scene.add(floor);
+
+      // Ceiling
+      const ceiling = floor.clone();
+      ceiling.position.y = 4;
+      ceiling.rotation.x = Math.PI / 2;
+      scene.add(ceiling);
+
+      // Walls
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
+      
+      const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(50, 4), wallMat);
+      leftWall.position.set(-5, 2, 0);
+      leftWall.rotation.y = Math.PI / 2;
+      scene.add(leftWall);
+
+      const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(50, 4), wallMat);
+      rightWall.position.set(5, 2, 0);
+      rightWall.rotation.y = -Math.PI / 2;
+      scene.add(rightWall);
+
+      const backWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 4), wallMat);
+      backWall.position.set(0, 2, -25);
+      scene.add(backWall);
+    }
+
+    function createMonster() {
+      const monsterGroup = new THREE.Group();
+
+      // Shadowy Body
+      const bodyGeo = new THREE.CylinderGeometry(0.3, 0.1, 2.5, 8);
+      const monsterMat = new THREE.MeshBasicMaterial({ color: 0x050505 });
+      const body = new THREE.Mesh(bodyGeo, monsterMat);
+      body.position.y = 1.25;
+      monsterGroup.add(body);
+
+      // Glowing Red Eyes
+      const eyeGeo = new THREE.SphereGeometry(0.04, 8, 8);
+      const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+      
+      const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+      leftEye.position.set(-0.1, 2.2, 0.25);
+      
+      const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+      rightEye.position.set(0.1, 2.2, 0.25);
+
+      monsterGroup.add(leftEye);
+      monsterGroup.add(rightEye);
+
+      // Position down the hallway
+      monsterGroup.position.set(0, 0, -18);
+      scene.add(monsterGroup);
+      monster = monsterGroup;
+    }
+
+    function setupVR() {
+      const button = document.getElementById('vr-button');
+
+      if (!window.isSecureContext) {
+        button.textContent = 'NEEDS HTTPS OR LOCALHOST';
+        button.disabled = true;
+        return;
+      }
+
+      if ('xr' in navigator) {
+        navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
+          if (supported) {
+            button.textContent = 'ENTER VR';
+            button.addEventListener('click', onEnterVR);
+          } else {
+            button.textContent = 'VR NOT SUPPORTED ON THIS DEVICE';
+            button.disabled = true;
+          }
+        }).catch(() => {
+          button.textContent = 'ERROR CHECKING VR SUPPORT';
+          button.disabled = true;
+        });
+      } else {
+        button.textContent = 'WEBXR NOT AVAILABLE';
+        button.disabled = true;
+      }
+    }
+
+    function onEnterVR() {
+      // Primary attempt: Request local-floor reference space
+      navigator.xr.requestSession('immersive-vr', {
+        requiredFeatures: ['local-floor'],
+        optionalFeatures: ['bounded-floor', 'hand-tracking']
+      }).then((session) => {
+        renderer.xr.setSession(session);
+        renderer.xr.setReferenceSpaceType('local-floor');
+        document.getElementById('vr-button').style.display = 'none';
+
+        session.addEventListener('end', () => {
+          document.getElementById('vr-button').style.display = 'block';
+        });
+      }).catch((err) => {
+        console.warn("local-floor failed, attempting fallback to 'local'", err);
+
+        // Fallback attempt: Request base local reference space
+        navigator.xr.requestSession('immersive-vr', {
+          requiredFeatures: ['local']
+        }).then((session) => {
+          renderer.xr.setSession(session);
+          renderer.xr.setReferenceSpaceType('local');
+          document.getElementById('vr-button').style.display = 'none';
+
+          session.addEventListener('end', () => {
+            document.getElementById('vr-button').style.display = 'block';
+          });
+        }).catch((fallbackErr) => {
+          console.error("VR Session failed:", fallbackErr);
+          alert("VR failed to start. Ensure the site is served over HTTPS (https://) or http://localhost.");
+        });
+      });
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function render(time) {
+      // Flashlight flicker
+      if (flashlight) {
+        flashlight.intensity = 1.8 + Math.sin(time * 0.02) * 0.3 + (Math.random() < 0.05 ? -0.8 : 0);
+      }
+
+      // Move creature closer over time
+      if (monster && monster.position.z < -2) {
+        monster.position.z += 0.008;
+        monster.position.x = Math.sin(time * 0.003) * 0.4;
+      }
+
+      renderer.render(scene, camera);
+    }
+  </script>
+</body>
+</html>
