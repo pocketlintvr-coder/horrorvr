@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VR Backrooms & Dreamcore Experience</title>
+  <title>VR Dreamcore Survival Experience</title>
   <style>
     body {
       margin: 0;
@@ -17,28 +17,28 @@
       left: 50%;
       transform: translateX(-50%);
       padding: 18px 36px;
-      background: linear-gradient(135deg, #8b8b00 0%, #4a4a00 100%);
+      background: linear-gradient(135deg, #0088aa 0%, #004466 100%);
       color: #ffffff;
-      border: 2px solid #ffff33;
+      border: 2px solid #00ffff;
       font-size: 20px;
       font-weight: bold;
       cursor: pointer;
       z-index: 999;
       border-radius: 8px;
-      box-shadow: 0 0 15px rgba(255, 255, 0, 0.4);
+      box-shadow: 0 0 15px rgba(0, 255, 255, 0.4);
     }
     #vr-button:hover {
-      background: linear-gradient(135deg, #ffff00 0%, #8b8b00 100%);
-      box-shadow: 0 0 25px rgba(255, 255, 0, 0.8);
+      background: linear-gradient(135deg, #00ffff 0%, #0088aa 100%);
+      box-shadow: 0 0 25px rgba(0, 255, 255, 0.8);
       color: #000;
     }
-    #jumpscare-overlay {
+    #damage-overlay {
       position: absolute;
       top: 0;
       left: 0;
       width: 100vw;
       height: 100vh;
-      background-color: rgba(255, 0, 0, 0.85);
+      background-color: rgba(255, 0, 0, 0.4);
       display: none;
       z-index: 1000;
       pointer-events: none;
@@ -47,13 +47,13 @@
       position: absolute;
       top: 20px;
       left: 20px;
-      color: #ffffdd;
+      color: #ffffff;
       font-size: 18px;
       font-weight: bold;
       background: rgba(0, 0, 0, 0.6);
-      padding: 10px 20px;
+      padding: 12px 24px;
       border-radius: 5px;
-      border: 1px solid #8b8b00;
+      border: 1px solid #00ffff;
       z-index: 998;
     }
   </style>
@@ -61,103 +61,51 @@
 </head>
 <body>
 
-  <button id="vr-button">ENTER VR EXPERIENCE</button>
-  <div id="objective-ui">LEVEL 1: Collect 3 Tapes (0/3) to unlock the Exit Door!</div>
-  <div id="jumpscare-overlay"></div>
+  <button id="vr-button">ENTER VR SURVIVAL</button>
+  <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | NIGHT SURVIVAL</div>
+  <div id="damage-overlay"></div>
 
   <script>
     let scene, camera, renderer, cameraGroup;
-    let flashlight, ambientLight, flickeringLight, sunLight;
-    let monster, level2Monster;
-    let exitDoor;
-    let vrObjectiveMesh, vrCanvas, vrCtx;
-    let wallMeshes = [];
-    let wallColliders = [];
-    let audioCtx = null;
+    let ambientLight, sunLight, flashlight;
+    let skySphereMesh, daySkyTexture, nightSkyTexture;
 
-    // Progression & Levels
-    let currentLevel = 1; // Level 1 = Backrooms, Level 2 = Dreamcore Hills
-    let level1Objects = [];
-    let level2Objects = [];
-
-    // Sky Dome Mesh for proper 360 projection & rotation
-    let skySphereMesh;
-    let daySkyTexture, nightSkyTexture;
+    // Survival Stats
+    let health = 100;
+    let hunger = 100;
     let isNight = false;
     let dayNightTimer = 0;
+    let isGameOver = false;
 
-    // Wrist Watch UI (Level Selector)
+    // Wrist Watch HUD & Sword
     let watchGroup, watchCanvas, watchCtx, watchTexture;
-    let watchRaycaster = new THREE.Raycaster();
-    let isSelectCooldown = false;
+    let swordMesh;
+    let swordBox = new THREE.Box3();
+    let prevSwordPos = new THREE.Vector3();
+    let swordVelocity = 0;
 
-    // AI Variables
-    let monsterState = 'PATROL';
-    let patrolTarget = new THREE.Vector3();
-    let raycaster = new THREE.Raycaster();
-    const MONSTER_PATROL_SPEED = 0.035;
-    const MONSTER_CHASE_SPEED = 0.065;
+    // Entities
+    let eyeMonsters = [];
+    let foodApples = [];
+    let audioCtx = null;
 
-    // Tapes objective tracking
-    let tapes = [];
-    let collectedTapes = 0;
-    const TOTAL_TAPES = 3;
-
-    // Controllers & Motion Tracking
+    // Motion & VR Controls
     let controller1, controller2;
     let grip1, grip2;
     let prevController1Pos = new THREE.Vector3();
     let prevController2Pos = new THREE.Vector3();
     let armSwingSpeedBoost = 0;
-
-    // Movement & Difficulty Tuning
-    const BASE_MOVE_SPEED = 0.06;
-    const JUMPSCARE_DISTANCE = 1.2;
+    const BASE_MOVE_SPEED = 0.08;
     const SNAP_ANGLE = Math.PI / 4;
     let canSnapTurn = true;
-    let isJumpscaring = false;
-    let hasEscaped = false;
-
-    // Level 1: Backrooms Maze (25x25)
-    // 0 = Empty, 1 = Wall, 2 = Exit Door, 3 = Cassette Tape
-    const mazeGrid = [
-      [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-      [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 3, 0, 1],
-      [1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1],
-      [1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1],
-      [1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1],
-      [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1],
-      [1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1],
-      [1, 0, 0, 0, 1, 0, 0, 0, 3, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1],
-      [1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1],
-      [1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1],
-      [1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1],
-      [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1],
-      [1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1],
-      [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1],
-      [1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1],
-      [1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 3, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1],
-      [1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1],
-      [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1],
-      [1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1],
-      [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1],
-      [1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1],
-      [1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1],
-      [1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1],
-      [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1],
-      [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-    ];
-    const CELL_SIZE = 4;
 
     init();
 
     function init() {
       scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x0a0a05);
-      scene.fog = new THREE.FogExp2(0x0a0a05, 0.08);
+      scene.fog = new THREE.FogExp2(0xaaccff, 0.005);
 
       cameraGroup = new THREE.Group();
-      resetPlayerPosition();
       scene.add(cameraGroup);
 
       camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 800);
@@ -166,116 +114,56 @@
       renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
       // Lights
-      ambientLight = new THREE.AmbientLight(0xd4ce98, 0.35);
+      ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
       scene.add(ambientLight);
-
-      flickeringLight = new THREE.PointLight(0xffea88, 2.0, 20);
-      flickeringLight.position.set(12 * CELL_SIZE, 3.2, 12 * CELL_SIZE);
-      scene.add(flickeringLight);
 
       sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
       sunLight.position.set(50, 100, 50);
-      sunLight.visible = false;
       scene.add(sunLight);
 
-      flashlight = new THREE.SpotLight(0xfffbe6, 5, 22, Math.PI / 5, 0.4, 1);
+      flashlight = new THREE.SpotLight(0xfffbe6, 5, 25, Math.PI / 5, 0.4, 1);
       const lightTarget = new THREE.Object3D();
       lightTarget.position.set(0, 0, -5);
       camera.add(lightTarget);
       flashlight.target = lightTarget;
+      flashlight.visible = false;
       camera.add(flashlight);
 
-      buildMaze();
       buildDreamcoreLevel();
-      createMonster();
-      createLevel2Monster();
       setupControllers();
+      createSword();
       createWristWatch();
-      createVrObjectiveText();
-      pickRandomPatrolTarget();
+      spawnFoodApples(15);
+
+      resetPlayerPosition();
 
       document.getElementById('vr-button').addEventListener('click', onEnterVR);
       window.addEventListener('resize', onWindowResize);
       renderer.setAnimationLoop(render);
     }
 
-    function createVrObjectiveText() {
-      vrCanvas = document.createElement('canvas');
-      vrCanvas.width = 512;
-      vrCanvas.height = 128;
-      vrCtx = vrCanvas.getContext('2d');
-
-      updateVrObjectiveUI();
-
-      const texture = new THREE.CanvasTexture(vrCanvas);
-      const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
-      const geo = new THREE.PlaneGeometry(1.2, 0.3);
-      vrObjectiveMesh = new THREE.Mesh(geo, mat);
-      vrObjectiveMesh.position.set(0, 0.5, -1.5);
-      camera.add(vrObjectiveMesh);
+    function getTerrainHeight(x, z) {
+      return Math.sin(x * 0.05) * Math.cos(z * 0.05) * 6 + Math.sin(x * 0.02) * 8;
     }
 
-    function updateVrObjectiveUI() {
-      if (!vrCtx) return;
-      vrCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      vrCtx.fillRect(0, 0, 512, 128);
-
-      if (currentLevel === 1) {
-        vrCtx.strokeStyle = collectedTapes === TOTAL_TAPES ? '#00ff00' : '#ffff00';
-        vrCtx.lineWidth = 4;
-        vrCtx.strokeRect(4, 4, 504, 120);
-        vrCtx.fillStyle = '#ffffff';
-        vrCtx.font = '22px sans-serif';
-        vrCtx.textAlign = 'center';
-
-        if (collectedTapes < TOTAL_TAPES) {
-          vrCtx.fillText(`Collect Tapes: ${collectedTapes}/${TOTAL_TAPES}`, 256, 50);
-          vrCtx.fillText('Find hidden tapes to unlock Exit!', 256, 85);
-        } else {
-          vrCtx.fillStyle = '#00ff00';
-          vrCtx.fillText('Exit Door Unlocked!', 256, 50);
-          vrCtx.fillText('Head to the Glowing Red Door', 256, 85);
-        }
-      } else {
-        vrCtx.strokeStyle = '#00ffff';
-        vrCtx.lineWidth = 4;
-        vrCtx.strokeRect(4, 4, 504, 120);
-        vrCtx.fillStyle = '#ffffff';
-        vrCtx.font = '22px sans-serif';
-        vrCtx.textAlign = 'center';
-        vrCtx.fillText('LEVEL 2: DREAMCORE HILLS', 256, 50);
-        vrCtx.fillText(isNight ? 'Beware the Night Eye...' : 'Explore the endless liminal space...', 256, 85);
-      }
-
-      if (vrObjectiveMesh) {
-        vrObjectiveMesh.material.map.needsUpdate = true;
-      }
-
-      const ui = document.getElementById('objective-ui');
-      if (currentLevel === 1) {
-        if (collectedTapes < TOTAL_TAPES) {
-          ui.innerText = `LEVEL 1: Collect 3 Tapes (${collectedTapes}/${TOTAL_TAPES}) to unlock the Exit Door!`;
-          ui.style.color = '#ffffdd';
-        } else {
-          ui.innerText = 'LEVEL 1: Exit Unlocked! Head to the Glowing Red Door to enter Level 2!';
-          ui.style.color = '#00ff00';
-        }
-      } else {
-        ui.innerText = isNight ? 'LEVEL 2: NIGHTTIME - The Giant Eye Approaches!' : 'LEVEL 2: Welcome to the Dreamcore Liminal Hills.';
-        ui.style.color = isNight ? '#ff4444' : '#88ffff';
-      }
+    function resetPlayerPosition() {
+      health = 100;
+      hunger = 100;
+      isGameOver = false;
+      const terrainY = getTerrainHeight(0, 0);
+      cameraGroup.position.set(0, terrainY + 1.6, 0);
+      cameraGroup.rotation.set(0, 0, 0);
+      updateWatchScreen();
+      update2DUI();
     }
 
     function createWristWatch() {
       watchGroup = new THREE.Group();
 
-      // Strap & Body
       const strapGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.12, 16);
       const strapMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
       const strap = new THREE.Mesh(strapGeo, strapMat);
@@ -283,12 +171,11 @@
       watchGroup.add(strap);
 
       const bodyGeo = new THREE.BoxGeometry(0.1, 0.02, 0.1);
-      const bodyMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8, roughness: 0.2 });
+      const bodyMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.8, roughness: 0.2 });
       const body = new THREE.Mesh(bodyGeo, bodyMat);
       body.position.y = 0.045;
       watchGroup.add(body);
 
-      // Interactive Screen Display
       watchCanvas = document.createElement('canvas');
       watchCanvas.width = 256;
       watchCanvas.height = 256;
@@ -300,10 +187,8 @@
       const screenMesh = new THREE.Mesh(screenGeo, screenMat);
       screenMesh.position.set(0, 0.056, 0);
       screenMesh.rotation.x = -Math.PI / 2;
-      screenMesh.name = "WatchScreen";
       watchGroup.add(screenMesh);
 
-      // Attach to left controller grip
       grip1.add(watchGroup);
       watchGroup.position.set(0, 0.02, -0.05);
       watchGroup.rotation.set(0.2, 0, 0);
@@ -313,7 +198,7 @@
 
     function updateWatchScreen() {
       if (!watchCtx) return;
-      watchCtx.fillStyle = '#0a0a10';
+      watchCtx.fillStyle = '#0a0a12';
       watchCtx.fillRect(0, 0, 256, 256);
 
       watchCtx.strokeStyle = '#00ffff';
@@ -323,382 +208,82 @@
       watchCtx.fillStyle = '#ffffff';
       watchCtx.font = 'bold 20px sans-serif';
       watchCtx.textAlign = 'center';
-      watchCtx.fillText('WARP WATCH', 128, 35);
+      watchCtx.fillText('SURVIVAL HUD', 128, 35);
 
-      // Level 1 Button Box
-      watchCtx.fillStyle = currentLevel === 1 ? '#008800' : '#222244';
-      watchCtx.fillRect(20, 55, 216, 80);
-      watchCtx.strokeStyle = '#00ff88';
-      watchCtx.lineWidth = 3;
-      watchCtx.strokeRect(20, 55, 216, 80);
+      // Health Bar
+      watchCtx.fillStyle = '#440000';
+      watchCtx.fillRect(20, 60, 216, 45);
+      watchCtx.fillStyle = '#ff2222';
+      watchCtx.fillRect(20, 60, (health / 100) * 216, 45);
+      watchCtx.strokeStyle = '#ffffff';
+      watchCtx.lineWidth = 2;
+      watchCtx.strokeRect(20, 60, 216, 45);
       watchCtx.fillStyle = '#ffffff';
-      watchCtx.font = 'bold 22px sans-serif';
-      watchCtx.fillText('LEVEL 1', 128, 90);
-      watchCtx.font = '14px sans-serif';
-      watchCtx.fillText('Backrooms', 128, 115);
+      watchCtx.font = 'bold 18px sans-serif';
+      watchCtx.fillText(`HP: ${Math.round(health)}`, 128, 88);
 
-      // Level 2 Button Box
-      watchCtx.fillStyle = currentLevel === 2 ? '#008800' : '#222244';
-      watchCtx.fillRect(20, 150, 216, 80);
-      watchCtx.strokeStyle = '#00ff88';
-      watchCtx.lineWidth = 3;
-      watchCtx.strokeRect(20, 150, 216, 80);
+      // Hunger Bar
+      watchCtx.fillStyle = '#443300';
+      watchCtx.fillRect(20, 130, 216, 45);
+      watchCtx.fillStyle = '#ffaa00';
+      watchCtx.fillRect(20, 130, (hunger / 100) * 216, 45);
+      watchCtx.strokeRect(20, 130, 216, 45);
       watchCtx.fillStyle = '#ffffff';
-      watchCtx.font = 'bold 22px sans-serif';
-      watchCtx.fillText('LEVEL 2', 128, 185);
-      watchCtx.font = '14px sans-serif';
-      watchCtx.fillText('Dreamcore Hills', 128, 210);
+      watchCtx.fillText(`HUNGER: ${Math.round(hunger)}`, 128, 158);
+
+      // Status Indicator
+      watchCtx.fillStyle = isNight ? '#ff3333' : '#33ff33';
+      watchCtx.font = 'bold 16px sans-serif';
+      watchCtx.fillText(isNight ? 'NIGHT: DANGER' : 'DAY: GATHER FOOD', 128, 215);
 
       if (watchTexture) watchTexture.needsUpdate = true;
     }
 
-    function checkWatchTouchInteractions() {
-      if (isSelectCooldown || !controller2) return;
+    function createSword() {
+      const swordGroup = new THREE.Group();
 
-      const rightHandPos = new THREE.Vector3();
-      controller2.getWorldPosition(rightHandPos);
+      // Blade
+      const bladeGeo = new THREE.BoxGeometry(0.04, 0.7, 0.015);
+      const bladeMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.5, metalness: 0.8, roughness: 0.2 });
+      const blade = new THREE.Mesh(bladeGeo, bladeMat);
+      blade.position.y = 0.4;
+      swordGroup.add(blade);
 
-      const screenMesh = watchGroup.getObjectByName("WatchScreen");
-      if (!screenMesh) return;
+      // Guard & Hilt
+      const guardGeo = new THREE.BoxGeometry(0.16, 0.02, 0.04);
+      const hiltMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9 });
+      const guard = new THREE.Mesh(guardGeo, hiltMat);
+      guard.position.y = 0.05;
+      swordGroup.add(guard);
 
-      const screenWorldPos = new THREE.Vector3();
-      screenMesh.getWorldPosition(screenWorldPos);
+      const handleGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.12, 16);
+      const handle = new THREE.Mesh(handleGeo, hiltMat);
+      handle.position.y = -0.02;
+      swordGroup.add(handle);
 
-      // Touch proximity detection between right hand and left wrist watch screen
-      if (rightHandPos.distanceTo(screenWorldPos) < 0.12) {
-        // Calculate point local to the watch canvas
-        const localPoint = screenMesh.worldToLocal(rightHandPos.clone());
-        const u = localPoint.x / 0.09 + 0.5;
-        const v = 0.5 - localPoint.y / 0.09;
-
-        if (u >= 0 && u <= 1 && v >= 0 && v <= 1) {
-          const pixelY = v * 256;
-
-          if (pixelY >= 55 && pixelY <= 135) {
-            if (currentLevel !== 1) {
-              transitionToLevel1();
-              triggerCooldown();
-            }
-          } else if (pixelY >= 150 && pixelY <= 230) {
-            if (currentLevel !== 2) {
-              transitionToLevel2();
-              triggerCooldown();
-            }
-          }
-        }
-      }
-    }
-
-    function triggerCooldown() {
-      isSelectCooldown = true;
-      setTimeout(() => { isSelectCooldown = false; }, 1200);
-    }
-
-    function resetPlayerPosition() {
-      if (currentLevel === 1) {
-        cameraGroup.position.set(1 * CELL_SIZE, 0, 1 * CELL_SIZE);
-      } else {
-        const terrainY = getTerrainHeight(0, 0);
-        cameraGroup.position.set(0, terrainY + 1.6, 0);
-      }
-      cameraGroup.rotation.set(0, 0, 0);
-    }
-
-    function resetMonsterPosition() {
-      if (monster) {
-        monster.scale.set(2.2, 2.8, 1);
-        monster.position.set(23 * CELL_SIZE, 1.4, 1 * CELL_SIZE);
-        monsterState = 'PATROL';
-        pickRandomPatrolTarget();
-      }
-    }
-
-    function pickRandomPatrolTarget() {
-      let valid = false;
-      while (!valid) {
-        const r = Math.floor(Math.random() * mazeGrid.length);
-        const c = Math.floor(Math.random() * mazeGrid[0].length);
-        if (mazeGrid[r][c] === 0) {
-          patrolTarget.set(c * CELL_SIZE, 1.4, r * CELL_SIZE);
-          valid = true;
-        }
-      }
-    }
-
-    function updateMonsterAI() {
-      if (!monster || isJumpscaring || hasEscaped || currentLevel !== 1) return;
-
-      const monsterPos = monster.position.clone();
-      const playerPos = cameraGroup.position.clone();
-      playerPos.y = 1.4;
-
-      const dirToPlayer = new THREE.Vector3().subVectors(playerPos, monsterPos);
-      const distToPlayer = dirToPlayer.length();
-      dirToPlayer.normalize();
-
-      raycaster.set(monsterPos, dirToPlayer);
-      const intersects = raycaster.intersectObjects(wallMeshes);
-
-      let canSeePlayer = false;
-      if (intersects.length === 0 || intersects[0].distance > distToPlayer) {
-        canSeePlayer = true;
-      }
-
-      if (canSeePlayer && distToPlayer < 18) {
-        monsterState = 'CHASE';
-      } else if (monsterState === 'CHASE' && !canSeePlayer && distToPlayer > 22) {
-        monsterState = 'PATROL';
-        pickRandomPatrolTarget();
-      }
-
-      if (monsterState === 'CHASE') {
-        if (distToPlayer <= JUMPSCARE_DISTANCE) {
-          triggerJumpscare();
-        } else {
-          monster.position.addScaledVector(dirToPlayer, MONSTER_CHASE_SPEED);
-        }
-      } else {
-        const dirToTarget = new THREE.Vector3().subVectors(patrolTarget, monsterPos);
-        const distToTarget = dirToTarget.length();
-
-        if (distToTarget < 1.0) {
-          pickRandomPatrolTarget();
-        } else {
-          dirToTarget.normalize();
-          monster.position.addScaledVector(dirToTarget, MONSTER_PATROL_SPEED);
-        }
-      }
-
-      monster.position.y = 1.4;
-    }
-
-    function playJumpscareSound() {
-      if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
-
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(120, audioCtx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.8);
-
-      gain.gain.setValueAtTime(1.0, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.8);
-
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.8);
-    }
-
-    function triggerJumpscare() {
-      if (isJumpscaring || hasEscaped) return;
-      isJumpscaring = true;
-
-      playJumpscareSound();
-
-      const overlay = document.getElementById('jumpscare-overlay');
-      overlay.style.display = 'block';
-
-      const activeMonster = (currentLevel === 2) ? level2Monster : monster;
-
-      if (activeMonster) {
-        activeMonster.scale.set(1.2, 1.5, 1);
-
-        const viewDir = new THREE.Vector3();
-        camera.getWorldDirection(viewDir);
-
-        const headPos = new THREE.Vector3();
-        camera.getWorldPosition(headPos);
-
-        activeMonster.position.copy(headPos).addScaledVector(viewDir, 1.0);
-        activeMonster.position.y = headPos.y - 0.2;
-      }
-
-      let shakeFrames = 0;
-      const shakeInterval = setInterval(() => {
-        cameraGroup.position.x += (Math.random() - 0.5) * 0.15;
-        cameraGroup.position.y += (Math.random() - 0.5) * 0.15;
-        shakeFrames++;
-
-        if (shakeFrames > 20) {
-          clearInterval(shakeInterval);
-          overlay.style.display = 'none';
-          resetPlayerPosition();
-          if (currentLevel === 1) {
-            resetMonsterPosition();
-          }
-          isJumpscaring = false;
-        }
-      }, 30);
-    }
-
-    function transitionToLevel1() {
-      currentLevel = 1;
-
-      // Hide Level 2 Objects & Sky Sphere
-      level2Objects.forEach(obj => obj.visible = false);
-      if (level2Monster) level2Monster.visible = false;
-      if (skySphereMesh) skySphereMesh.visible = false;
-      sunLight.visible = false;
-
-      // Show Level 1 Objects
-      level1Objects.forEach(obj => obj.visible = true);
-      if (monster) monster.visible = true;
-      if (flickeringLight) flickeringLight.visible = true;
-
-      scene.background = new THREE.Color(0x0a0a05);
-      scene.fog = new THREE.FogExp2(0x0a0a05, 0.08);
-      ambientLight.color.setHex(0xd4ce98);
-      ambientLight.intensity = 0.35;
-      flashlight.visible = true;
-
-      resetPlayerPosition();
-      resetMonsterPosition();
-      updateVrObjectiveUI();
-      updateWatchScreen();
-    }
-
-    function transitionToLevel2() {
-      currentLevel = 2;
-
-      // Hide Level 1 Objects
-      level1Objects.forEach(obj => obj.visible = false);
-      if (monster) monster.visible = false;
-      if (flickeringLight) flickeringLight.visible = false;
-
-      // Show Level 2 Objects & Sky Sphere
-      level2Objects.forEach(obj => obj.visible = true);
-      if (skySphereMesh) skySphereMesh.visible = true;
-      sunLight.visible = true;
-
-      // Set Sky Material Texture & Fog
-      skySphereMesh.material.map = daySkyTexture;
-      skySphereMesh.material.needsUpdate = true;
-      scene.background = null;
-      scene.fog = new THREE.FogExp2(0xaaccff, 0.005);
-      ambientLight.color.setHex(0xffffff);
-      ambientLight.intensity = 0.9;
-      flashlight.visible = false;
-
-      if (level2Monster) level2Monster.visible = false;
-
-      dayNightTimer = 0;
-      isNight = false;
-
-      resetPlayerPosition();
-      updateVrObjectiveUI();
-      updateWatchScreen();
-    }
-
-    function buildMaze() {
-      const textureLoader = new THREE.TextureLoader();
-
-      const floorTexture = textureLoader.load('https://i.postimg.cc/d0GDW4qv/backrooms-textures-map-result-image-v0-cn40k99826b91.webp');
-      floorTexture.wrapS = THREE.RepeatWrapping;
-      floorTexture.wrapT = THREE.RepeatWrapping;
-      floorTexture.repeat.set(25 * 2, 25 * 2);
-
-      const wallTexture = textureLoader.load('https://i.postimg.cc/MpMnBzNM/hey-i-have-a-question-for-you-all-why-are-the-walls-in-the-v0-uc5walc8c3df1.webp');
-      wallTexture.wrapS = THREE.RepeatWrapping;
-      wallTexture.wrapT = THREE.RepeatWrapping;
-      wallTexture.repeat.set(1, 1);
-
-      const mapWidth = mazeGrid[0].length * CELL_SIZE;
-      const mapHeight = mazeGrid.length * CELL_SIZE;
-
-      // Floor
-      const floorGeo = new THREE.PlaneGeometry(mapWidth, mapHeight);
-      const floorMat = new THREE.MeshStandardMaterial({ map: floorTexture, roughness: 0.8 });
-      const floor = new THREE.Mesh(floorGeo, floorMat);
-      floor.rotation.x = -Math.PI / 2;
-      floor.position.set(mapWidth / 2 - CELL_SIZE / 2, 0, mapHeight / 2 - CELL_SIZE / 2);
-      scene.add(floor);
-      level1Objects.push(floor);
-
-      // Ceiling
-      const ceiling = floor.clone();
-      ceiling.position.y = 3.5;
-      ceiling.rotation.x = Math.PI / 2;
-      scene.add(ceiling);
-      level1Objects.push(ceiling);
-
-      // Walls & Items
-      const wallGeo = new THREE.BoxGeometry(CELL_SIZE, 3.5, CELL_SIZE);
-      const wallMat = new THREE.MeshStandardMaterial({ map: wallTexture, roughness: 0.7 });
-
-      const tapeGeo = new THREE.BoxGeometry(0.5, 0.15, 0.8);
-      const tapeMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.3, emissive: 0x333300 });
-
-      for (let r = 0; r < mazeGrid.length; r++) {
-        for (let c = 0; c < mazeGrid[r].length; c++) {
-          if (mazeGrid[r][c] === 1) {
-            const wall = new THREE.Mesh(wallGeo, wallMat);
-            wall.position.set(c * CELL_SIZE, 1.75, r * CELL_SIZE);
-            scene.add(wall);
-            wallMeshes.push(wall);
-            wallColliders.push(new THREE.Box3().setFromObject(wall));
-            level1Objects.push(wall);
-          } else if (mazeGrid[r][c] === 2) {
-            const doorGeo = new THREE.BoxGeometry(CELL_SIZE * 0.8, 3.2, 0.4);
-            const doorMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xaa0000 });
-            exitDoor = new THREE.Mesh(doorGeo, doorMat);
-            exitDoor.position.set(c * CELL_SIZE, 1.6, r * CELL_SIZE);
-            scene.add(exitDoor);
-            level1Objects.push(exitDoor);
-
-            const exitLight = new THREE.PointLight(0xff0000, 3, 8);
-            exitLight.position.set(c * CELL_SIZE, 2.0, r * CELL_SIZE);
-            scene.add(exitLight);
-            level1Objects.push(exitLight);
-          } else if (mazeGrid[r][c] === 3) {
-            const tape = new THREE.Mesh(tapeGeo, tapeMat);
-            tape.position.set(c * CELL_SIZE, 0.8, r * CELL_SIZE);
-            scene.add(tape);
-            tapes.push(tape);
-            level1Objects.push(tape);
-
-            const tapeLight = new THREE.PointLight(0xffff00, 1.5, 4);
-            tapeLight.position.set(c * CELL_SIZE, 1.2, r * CELL_SIZE);
-            scene.add(tapeLight);
-            level1Objects.push(tapeLight);
-          }
-        }
-      }
-    }
-
-    // Helper for computing terrain elevation height at any (x, z)
-    function getTerrainHeight(x, z) {
-      return Math.sin(x * 0.05) * Math.cos(z * 0.05) * 6 + Math.sin(x * 0.02) * 8;
+      swordMesh = swordGroup;
+      grip2.add(swordMesh);
+      swordMesh.position.set(0, 0, -0.05);
+      swordMesh.rotation.set(-Math.PI / 4, 0, 0);
     }
 
     function buildDreamcoreLevel() {
       const textureLoader = new THREE.TextureLoader();
 
-      // Load Custom Grass, Day Sky, and Night Sky Textures
       const customGrassTexture = textureLoader.load('https://i.postimg.cc/C1PN1FWR/Getty-Images-1407861824-ee2a308b7f134e509f4d3463653d6cfe.jpg');
       customGrassTexture.wrapS = THREE.RepeatWrapping;
       customGrassTexture.wrapT = THREE.RepeatWrapping;
-      customGrassTexture.repeat.set(20, 20);
+      customGrassTexture.repeat.set(25, 25);
 
       daySkyTexture = textureLoader.load('https://i.postimg.cc/BZzpfnTN/images-(7).jpg');
       nightSkyTexture = textureLoader.load('https://i.postimg.cc/FKGbWrFs/images-(8).jpg');
 
-      // Create 360-degree Rotating Sky Dome Geometry to fix still/bugged sky rendering
-      const skyGeo = new THREE.SphereGeometry(400, 60, 40);
+      const skyGeo = new THREE.SphereGeometry(450, 60, 40);
       const skyMat = new THREE.MeshBasicMaterial({ map: daySkyTexture, side: THREE.BackSide });
       skySphereMesh = new THREE.Mesh(skyGeo, skyMat);
-      skySphereMesh.visible = false;
       scene.add(skySphereMesh);
 
-      // Create Dreamcore Rolling Green Hills Terrain
-      const terrainGeo = new THREE.PlaneGeometry(300, 300, 120, 120);
+      const terrainGeo = new THREE.PlaneGeometry(350, 350, 120, 120);
       terrainGeo.rotateX(-Math.PI / 2);
 
       const pos = terrainGeo.attributes.position;
@@ -711,20 +296,15 @@
 
       const grassMat = new THREE.MeshStandardMaterial({ map: customGrassTexture, roughness: 0.8 });
       const terrain = new THREE.Mesh(terrainGeo, grassMat);
-      terrain.visible = false;
       scene.add(terrain);
-      level2Objects.push(terrain);
 
-      // Add Liminal Houses
+      // Liminal Houses
       const houseMat = new THREE.MeshStandardMaterial({ color: 0xfffdd0, roughness: 0.5 });
       const roofMat = new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.6 });
-      const roadMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
 
       const houseXZPositions = [
-        { x: -30, z: -40 },
-        { x: 50, z: -60 },
-        { x: -20, z: 60 },
-        { x: 60, z: 40 }
+        { x: -35, z: -45 }, { x: 55, z: -65 },
+        { x: -25, z: 65 }, { x: 65, z: 45 }
       ];
 
       houseXZPositions.forEach(p => {
@@ -743,121 +323,51 @@
         houseGroup.add(houseBody);
         houseGroup.add(roof);
         houseGroup.position.set(p.x, terrainY, p.z);
-        houseGroup.visible = false;
         scene.add(houseGroup);
-        level2Objects.push(houseGroup);
       });
+    }
 
-      // Winding Road
-      const roadGeo = new THREE.PlaneGeometry(8, 200, 10, 50);
-      roadGeo.rotateX(-Math.PI / 2);
-      const roadPos = roadGeo.attributes.position;
-      for (let i = 0; i < roadPos.count; i++) {
-        const x = roadPos.getX(i);
-        const z = roadPos.getZ(i);
-        const actualX = x + Math.sin(z * 0.04) * 15;
-        roadPos.setX(i, actualX);
-        roadPos.setY(i, getTerrainHeight(actualX, z) + 0.1);
+    function spawnFoodApples(count) {
+      const appleGeo = new THREE.SphereGeometry(0.2, 16, 16);
+      const appleMat = new THREE.MeshStandardMaterial({ color: 0xff0033, roughness: 0.3, emissive: 0x440011 });
+
+      for (let i = 0; i < count; i++) {
+        const apple = new THREE.Mesh(appleGeo, appleMat);
+        const x = (Math.random() - 0.5) * 200;
+        const z = (Math.random() - 0.5) * 200;
+        const y = getTerrainHeight(x, z) + 0.3;
+        apple.position.set(x, y, z);
+        scene.add(apple);
+        foodApples.push(apple);
       }
-      roadGeo.computeVertexNormals();
-
-      const road = new THREE.Mesh(roadGeo, roadMat);
-      road.visible = false;
-      scene.add(road);
-      level2Objects.push(road);
     }
 
-    function createMonster() {
-      const textureLoader = new THREE.TextureLoader();
-      const monsterTexture = textureLoader.load('https://i.postimg.cc/66Mq17NV/IMG-3836-pixel.png');
-
-      const mat = new THREE.SpriteMaterial({ map: monsterTexture, transparent: true });
-      monster = new THREE.Sprite(mat);
-      resetMonsterPosition();
-      scene.add(monster);
-    }
-
-    function createLevel2Monster() {
+    function spawnEyeMonsters(count) {
       const textureLoader = new THREE.TextureLoader();
       const eyeTexture = textureLoader.load('https://i.postimg.cc/T3JHxXYf/creepy-eye-png-by-solarmaker2005-dhue8bn-fullview-(1).png');
-
       const mat = new THREE.SpriteMaterial({ map: eyeTexture, transparent: true });
-      level2Monster = new THREE.Sprite(mat);
-      level2Monster.scale.set(6, 6, 1);
-      level2Monster.visible = false;
-      scene.add(level2Monster);
+
+      for (let i = 0; i < count; i++) {
+        const eye = new THREE.Sprite(mat);
+        const playerPos = cameraGroup.position;
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 30 + Math.random() * 20;
+
+        const ex = playerPos.x + Math.cos(angle) * dist;
+        const ez = playerPos.z + Math.sin(angle) * dist;
+        const ey = getTerrainHeight(ex, ez) + 2.5;
+
+        eye.position.set(ex, ey, ez);
+        eye.scale.set(4.5, 4.5, 1);
+        eye.userData = { hp: 3, speed: 0.06 + Math.random() * 0.03 };
+        scene.add(eye);
+        eyeMonsters.push(eye);
+      }
     }
 
-    function updateLevel2DayNight(deltaTime) {
-      if (currentLevel !== 2) return;
-
-      dayNightTimer += deltaTime;
-
-      if (dayNightTimer >= 30) {
-        dayNightTimer = 0;
-        isNight = !isNight;
-
-        if (isNight) {
-          if (skySphereMesh) {
-            skySphereMesh.material.map = nightSkyTexture;
-            skySphereMesh.material.needsUpdate = true;
-          }
-          scene.fog.color.setHex(0x050515);
-          scene.fog.density = 0.015;
-          ambientLight.color.setHex(0x333355);
-          ambientLight.intensity = 0.25;
-          sunLight.intensity = 0.2;
-          flashlight.visible = true;
-
-          // Spawn Creepy Eye Monster nearby during Nighttime
-          if (level2Monster) {
-            const playerPos = cameraGroup.position.clone();
-            const angle = Math.random() * Math.PI * 2;
-            const dist = 35;
-            const eyeX = playerPos.x + Math.cos(angle) * dist;
-            const eyeZ = playerPos.z + Math.sin(angle) * dist;
-            const eyeY = getTerrainHeight(eyeX, eyeZ) + 3.0;
-
-            level2Monster.position.set(eyeX, eyeY, eyeZ);
-            level2Monster.scale.set(6, 6, 1);
-            level2Monster.visible = true;
-          }
-        } else {
-          if (skySphereMesh) {
-            skySphereMesh.material.map = daySkyTexture;
-            skySphereMesh.material.needsUpdate = true;
-          }
-          scene.fog.color.setHex(0xaaccff);
-          scene.fog.density = 0.005;
-          ambientLight.color.setHex(0xffffff);
-          ambientLight.intensity = 0.9;
-          sunLight.intensity = 1.2;
-          flashlight.visible = false;
-
-          if (level2Monster) {
-            level2Monster.visible = false;
-          }
-        }
-
-        updateVrObjectiveUI();
-      }
-
-      // Level 2 Eye Monster Chase Mechanics during Nighttime
-      if (isNight && level2Monster && !isJumpscaring) {
-        const playerPos = cameraGroup.position.clone();
-        const eyePos = level2Monster.position.clone();
-
-        const dirToPlayer = new THREE.Vector3().subVectors(playerPos, eyePos);
-        const distToPlayer = dirToPlayer.length();
-        dirToPlayer.normalize();
-
-        if (distToPlayer <= JUMPSCARE_DISTANCE + 0.5) {
-          triggerJumpscare();
-        } else {
-          level2Monster.position.addScaledVector(dirToPlayer, 0.085);
-          level2Monster.position.y = getTerrainHeight(level2Monster.position.x, level2Monster.position.z) + 3.0;
-        }
-      }
+    function clearEyeMonsters() {
+      eyeMonsters.forEach(eye => scene.remove(eye));
+      eyeMonsters = [];
     }
 
     function setupControllers() {
@@ -868,7 +378,7 @@
       grip2 = renderer.xr.getControllerGrip(1);
 
       const handGeo = new THREE.SphereGeometry(0.04, 16, 16);
-      const handMat = new THREE.MeshStandardMaterial({ color: 0x888800, roughness: 0.3 });
+      const handMat = new THREE.MeshStandardMaterial({ color: 0x0088aa, roughness: 0.3 });
 
       grip1.add(new THREE.Mesh(handGeo, handMat));
       grip2.add(new THREE.Mesh(handGeo, handMat));
@@ -903,7 +413,7 @@
     }
 
     function processThumbstickLocomotion() {
-      if (isJumpscaring || hasEscaped) return;
+      if (isGameOver) return;
 
       updateArmSwingMotion();
 
@@ -937,46 +447,9 @@
             .addScaledVector(rightDir, xAxis * currentSpeed);
 
           const nextPos = cameraGroup.position.clone().add(moveVec);
-
-          if (currentLevel === 1) {
-            tapes.forEach(tape => {
-              if (tape.visible && nextPos.distanceTo(tape.position) < 1.5) {
-                tape.visible = false;
-                collectedTapes++;
-                updateVrObjectiveUI();
-              }
-            });
-
-            if (exitDoor && nextPos.distanceTo(exitDoor.position) < 1.8) {
-              if (collectedTapes >= TOTAL_TAPES) {
-                transitionToLevel2();
-                return;
-              }
-            }
-
-            let collide = false;
-            const playerRadius = 0.4;
-            const playerBox = new THREE.Box3(
-              new THREE.Vector3(nextPos.x - playerRadius, 0, nextPos.z - playerRadius),
-              new THREE.Vector3(nextPos.x + playerRadius, 2, nextPos.z + playerRadius)
-            );
-
-            for (let i = 0; i < wallColliders.length; i++) {
-              if (playerBox.intersectsBox(wallColliders[i])) {
-                collide = true;
-                break;
-              }
-            }
-
-            if (!collide) {
-              cameraGroup.position.copy(nextPos);
-            }
-          } else {
-            // Level 2 continuous terrain movement height match
-            const terrainY = getTerrainHeight(nextPos.x, nextPos.z);
-            nextPos.y = terrainY + 1.6;
-            cameraGroup.position.copy(nextPos);
-          }
+          const terrainY = getTerrainHeight(nextPos.x, nextPos.z);
+          nextPos.y = terrainY + 1.6;
+          cameraGroup.position.copy(nextPos);
         }
 
         if (source.handedness === 'right') {
@@ -986,6 +459,148 @@
           }
         }
       }
+    }
+
+    function updateDayNightCycle(deltaTime) {
+      dayNightTimer += deltaTime;
+
+      // Deplete Hunger over time
+      hunger = Math.max(0, hunger - deltaTime * 0.8);
+      if (hunger <= 0) {
+        health = Math.max(0, health - deltaTime * 2.0);
+      }
+
+      if (dayNightTimer >= 35) {
+        dayNightTimer = 0;
+        isNight = !isNight;
+
+        if (isNight) {
+          skySphereMesh.material.map = nightSkyTexture;
+          skySphereMesh.material.needsUpdate = true;
+          scene.fog.color.setHex(0x050515);
+          scene.fog.density = 0.015;
+          ambientLight.color.setHex(0x333355);
+          ambientLight.intensity = 0.25;
+          sunLight.intensity = 0.2;
+          flashlight.visible = true;
+
+          spawnEyeMonsters(4);
+        } else {
+          skySphereMesh.material.map = daySkyTexture;
+          skySphereMesh.material.needsUpdate = true;
+          scene.fog.color.setHex(0xaaccff);
+          scene.fog.density = 0.005;
+          ambientLight.color.setHex(0xffffff);
+          ambientLight.intensity = 0.9;
+          sunLight.intensity = 1.2;
+          flashlight.visible = false;
+
+          clearEyeMonsters();
+          spawnFoodApples(6);
+        }
+      }
+
+      if (health <= 0 && !isGameOver) {
+        triggerDeath();
+      }
+
+      updateWatchScreen();
+      update2DUI();
+    }
+
+    function updateCombatAndInteractions() {
+      if (isGameOver || !swordMesh) return;
+
+      // Sword Swing Speed Calculation
+      const currSwordWorldPos = new THREE.Vector3();
+      swordMesh.getWorldPosition(currSwordWorldPos);
+      swordVelocity = currSwordWorldPos.distanceTo(prevSwordPos);
+      prevSwordPos.copy(currSwordWorldPos);
+
+      // Check Sword Collision with Eye Monsters
+      for (let i = eyeMonsters.length - 1; i >= 0; i--) {
+        const eye = eyeMonsters[i];
+        const distToSword = currSwordWorldPos.distanceTo(eye.position);
+
+        if (distToSword < 2.0 && swordVelocity > 0.04) {
+          eye.userData.hp -= 1;
+          playSound(220, 'sawtooth', 0.2);
+
+          // Knockback effect
+          const pushDir = new THREE.Vector3().subVectors(eye.position, currSwordWorldPos).normalize();
+          eye.position.addScaledVector(pushDir, 3.0);
+
+          if (eye.userData.hp <= 0) {
+            scene.remove(eye);
+            eyeMonsters.splice(i, 1);
+          }
+        } else {
+          // Eye attacks player
+          const playerPos = cameraGroup.position.clone();
+          const dirToPlayer = new THREE.Vector3().subVectors(playerPos, eye.position);
+          const distToPlayer = dirToPlayer.length();
+          dirToPlayer.normalize();
+
+          if (distToPlayer <= 1.2) {
+            health = Math.max(0, health - 0.4);
+            triggerDamageFlash();
+          } else {
+            eye.position.addScaledVector(dirToPlayer, eye.userData.speed);
+            eye.position.y = getTerrainHeight(eye.position.x, eye.position.z) + 2.5;
+          }
+        }
+      }
+
+      // Check Food Collection
+      const playerPos = cameraGroup.position;
+      for (let i = foodApples.length - 1; i >= 0; i--) {
+        const apple = foodApples[i];
+        if (playerPos.distanceTo(apple.position) < 1.8) {
+          hunger = Math.min(100, hunger + 25);
+          health = Math.min(100, health + 10);
+          playSound(440, 'sine', 0.15);
+          scene.remove(apple);
+          foodApples.splice(i, 1);
+        }
+      }
+    }
+
+    function triggerDamageFlash() {
+      const overlay = document.getElementById('damage-overlay');
+      overlay.style.display = 'block';
+      setTimeout(() => { overlay.style.display = 'none'; }, 80);
+    }
+
+    function triggerDeath() {
+      isGameOver = true;
+      playSound(80, 'sawtooth', 0.8);
+      alert("You succumbed to the Dreamcore Hills... Respawning!");
+      clearEyeMonsters();
+      resetPlayerPosition();
+    }
+
+    function playSound(freq, type, duration) {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    }
+
+    function update2DUI() {
+      const ui = document.getElementById('objective-ui');
+      ui.innerText = `HEALTH: ${Math.round(health)} | HUNGER: ${Math.round(hunger)} | ${isNight ? 'NIGHTTIME (FIGHT THE EYES!)' : 'DAYTIME (COLLECT APPLES)'}`;
+      ui.style.color = isNight ? '#ff4444' : '#00ffff';
     }
 
     function onEnterVR() {
@@ -1005,7 +620,6 @@
         });
       }).catch((err) => {
         console.error("VR Session Error:", err);
-        alert("Could not start VR session. Ensure site URL starts with https://");
       });
     }
 
@@ -1023,29 +637,16 @@
       lastClockTime = now;
 
       processThumbstickLocomotion();
-      checkWatchTouchInteractions();
+      updateDayNightCycle(deltaTime);
+      updateCombatAndInteractions();
 
-      if (currentLevel === 1) {
-        updateMonsterAI();
-
-        tapes.forEach(tape => {
-          if (tape.visible) {
-            tape.rotation.y += 0.03;
-          }
-        });
-
-        if (flickeringLight) {
-          flickeringLight.intensity = 1.0 + Math.sin(timestamp * 0.015) * 0.8 + (Math.random() < 0.08 ? -1.2 : 0);
-        }
-      } else if (currentLevel === 2) {
-        updateLevel2DayNight(deltaTime);
-
-        // Keep Sky Sphere centered around the player and slowly rotate sky for realism
-        if (skySphereMesh) {
-          skySphereMesh.position.copy(cameraGroup.position);
-          skySphereMesh.rotation.y += 0.0003;
-        }
+      if (skySphereMesh) {
+        skySphereMesh.position.copy(cameraGroup.position);
+        skySphereMesh.rotation.y += 0.0003;
       }
+
+      // Rotate food apples
+      foodApples.forEach(a => a.rotation.y += 0.02);
 
       renderer.render(scene, camera);
     }
