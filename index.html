@@ -43,17 +43,15 @@
     let flashlight, ambientLight, flickeringLight;
     let monster;
 
-    // Controllers & Motion Data
-    let controller1, controller2;
+    // Controllers
     let grip1, grip2;
-
     const handPrevPos = [new THREE.Vector3(), new THREE.Vector3()];
     const handCurrPos = [new THREE.Vector3(), new THREE.Vector3()];
 
-    // Physics Tuning
-    const velocity = new THREE.Vector3(0, 0, 0);
-    const PUSH_FORCE = 6.0;
-    const FRICTION = 0.82;
+    // Locomotion Settings
+    const playerVelocity = new THREE.Vector3(0, 0, 0);
+    const SWIPE_SENSITIVITY = 4.0;
+    const FRICTION = 0.85;
 
     init();
 
@@ -202,20 +200,15 @@
     }
 
     function setupControllers() {
-      controller1 = renderer.xr.getController(0);
-      controller2 = renderer.xr.getController(1);
-
       grip1 = renderer.xr.getControllerGrip(0);
       grip2 = renderer.xr.getControllerGrip(1);
 
-      const handGeo = new THREE.SphereGeometry(0.16, 16, 16);
+      const handGeo = new THREE.SphereGeometry(0.15, 16, 16);
       const handMat = new THREE.MeshStandardMaterial({ color: 0xcc1111, roughness: 0.3, emissive: 0x220000 });
 
       grip1.add(new THREE.Mesh(handGeo, handMat));
       grip2.add(new THREE.Mesh(handGeo, handMat));
 
-      cameraGroup.add(controller1);
-      cameraGroup.add(controller2);
       cameraGroup.add(grip1);
       cameraGroup.add(grip2);
     }
@@ -226,6 +219,7 @@
 
       scene.updateMatrixWorld(true);
 
+      // Get view direction
       const forwardDir = new THREE.Vector3();
       camera.getWorldDirection(forwardDir);
       forwardDir.y = 0;
@@ -234,43 +228,34 @@
       const rightDir = new THREE.Vector3().crossVectors(camera.up, forwardDir).negate();
 
       const grips = [grip1, grip2];
-      const controllers = [controller1, controller2];
 
       for (let i = 0; i < 2; i++) {
         const grip = grips[i];
-        const controller = controllers[i];
         if (!grip) continue;
 
         grip.getWorldPosition(handCurrPos[i]);
 
+        // Direct displacement delta
         const handDelta = new THREE.Vector3().subVectors(handPrevPos[i], handCurrPos[i]);
 
-        // Trigger input or downward arm motion directly drives speed
-        let isTriggerPressed = false;
-        if (controller && controller.hasAttribute && controller.userData) {
-          const inputSource = controller.userData.inputSource;
-          if (inputSource && inputSource.gamepad && inputSource.gamepad.buttons[0]) {
-            isTriggerPressed = inputSource.gamepad.buttons[0].pressed;
-          }
-        }
-
-        // Apply impulse when holding trigger OR swinging arm backward/downward
-        if (isTriggerPressed || handDelta.length() > 0.002) {
+        // Push player backward/forward based on physical arm movement direction
+        if (handDelta.length() > 0.003) {
           const deltaForward = handDelta.dot(forwardDir);
           const deltaRight = handDelta.dot(rightDir);
 
-          velocity.x += (forwardDir.x * deltaForward + rightDir.x * deltaRight) * PUSH_FORCE;
-          velocity.z += (forwardDir.z * deltaForward + rightDir.z * deltaRight) * PUSH_FORCE;
+          playerVelocity.x += (forwardDir.x * deltaForward + rightDir.x * deltaRight) * SWIPE_SENSITIVITY;
+          playerVelocity.z += (forwardDir.z * deltaForward + rightDir.z * deltaRight) * SWIPE_SENSITIVITY;
         }
 
         handPrevPos[i].copy(handCurrPos[i]);
       }
 
-      cameraGroup.position.x += velocity.x;
-      cameraGroup.position.z += velocity.z;
+      // Apply velocity vector directly to player rig
+      cameraGroup.position.x += playerVelocity.x;
+      cameraGroup.position.z += playerVelocity.z;
 
-      velocity.x *= FRICTION;
-      velocity.z *= FRICTION;
+      playerVelocity.x *= FRICTION;
+      playerVelocity.z *= FRICTION;
 
       cameraGroup.position.x = Math.max(-5.2, Math.min(5.2, cameraGroup.position.x));
       cameraGroup.position.z = Math.max(-35, Math.min(8, cameraGroup.position.z));
@@ -283,7 +268,7 @@
       }
 
       navigator.xr.requestSession('immersive-vr', {
-        optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+        optionalFeatures: ['local-floor', 'bounded-floor']
       }).then((session) => {
         renderer.xr.setSession(session);
         document.getElementById('vr-button').style.display = 'none';
