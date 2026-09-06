@@ -83,11 +83,8 @@
     let dayNightTimer = 0;
     let isGameOver = false;
 
-    // Upgrades System
-    let damageMultiplier = 1;
-    let speedUpgradeLevel = 0;
+    // Active Buffs
     let speedBoostTimer = 0;
-    let upgradeAltars = [];
 
     // Wrist Watch HUD & Equipment
     let watchGroup, watchCanvas, watchCtx, watchTexture;
@@ -143,7 +140,7 @@
 
       const v1 = SmoothNoise(intX, intZ);
       const v2 = SmoothNoise(intX + 1, intZ);
-      const v3 = SmoothNoise(intX, intZ + 1);
+      const v3 = SmoothNoise(intX + 1, intZ);
       const v4 = SmoothNoise(intX + 1, intZ + 1);
 
       const i1 = v1 * (1 - fracX) + v2 * fracX;
@@ -233,8 +230,6 @@
       hunger = 100;
       crystalsCollected = 0;
       daysSurvived = 1;
-      damageMultiplier = 1;
-      speedUpgradeLevel = 0;
       speedBoostTimer = 0;
       isGameOver = false;
       
@@ -423,23 +418,8 @@
         roof.castShadow = true;
         houseGroup.add(roof);
 
-        // Upgrade Altar inside house
-        const altarGeo = new THREE.CylinderGeometry(0.5, 0.6, 1.0, 8);
-        const altarMat = new THREE.MeshStandardMaterial({ color: 0x112244, roughness: 0.3, metalness: 0.8 });
-        const altar = new THREE.Mesh(altarGeo, altarMat);
-        altar.position.set(0, 0.5, -2);
-        houseGroup.add(altar);
-
-        const orbGeo = new THREE.SphereGeometry(0.3, 16, 16);
-        const orbMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.8 });
-        const orb = new THREE.Mesh(orbGeo, orbMat);
-        orb.position.set(0, 1.3, -2);
-        houseGroup.add(orb);
-
         houseGroup.position.set(hX, hY, hZ);
         group.add(houseGroup);
-
-        upgradeAltars.push({ mesh: orb, x: hX, z: hZ - 2, group: group });
 
         const hw = houseWidth / 2;
         colliders.push({ type: 'box', minX: hX - hw, maxX: hX + hw, minZ: hZ - hw - wallThickness, maxZ: hZ - hw + wallThickness, group: group });
@@ -510,7 +490,6 @@
 
     function disposeGroup(group) {
       colliders = colliders.filter(c => c.group !== group);
-      upgradeAltars = upgradeAltars.filter(a => a.group !== group);
 
       group.traverse(child => {
         if (child.isMesh) {
@@ -630,14 +609,14 @@
       watchCtx.font = 'bold 15px sans-serif';
       watchCtx.fillText(`CRYSTALS: ${crystalsCollected}`, 128, 138);
 
-      watchCtx.fillStyle = '#ffff00';
+      watchCtx.fillStyle = speedBoostTimer > 0 ? '#00ff00' : '#ffff00';
       watchCtx.font = 'bold 13px sans-serif';
-      watchCtx.fillText(`PWR: x${damageMultiplier.toFixed(1)} | SPD: +${speedUpgradeLevel * 20}%`, 128, 160);
+      watchCtx.fillText(speedBoostTimer > 0 ? `SPEED BOOST (${Math.ceil(speedBoostTimer)}s)` : 'A-BTN: HEAL & SPEED', 128, 160);
 
       const playerSafe = isInsideSafeZone(cameraGroup.position.x, cameraGroup.position.z);
       watchCtx.fillStyle = playerSafe ? '#00ffcc' : (isNight ? '#ff3333' : '#33ff33');
       watchCtx.font = 'bold 13px sans-serif';
-      watchCtx.fillText(playerSafe ? 'ALTAR: ALT-ACTION UPGRADE' : (isNight ? 'NIGHT: EYE SWARM' : 'A-BTN: HEAL/SPEED BOOST'), 128, 205);
+      watchCtx.fillText(playerSafe ? 'SAFE ZONE (HOUSE)' : (isNight ? 'NIGHT: EYE SWARM' : 'DAYTIME EXPLORATION'), 128, 205);
 
       if (watchTexture) watchTexture.needsUpdate = true;
     }
@@ -679,7 +658,6 @@
         const eye = new THREE.Sprite(mat);
         const playerPos = cameraGroup.position;
         
-        // Evenly spread out in a full circle around the player at a wide distance
         const angle = (i / count) * Math.PI * 2 + (Math.random() * 0.4 - 0.2);
         const dist = 45 + Math.random() * 35;
 
@@ -759,7 +737,7 @@
       if (crystalsCollected > 0) {
         crystalsCollected--;
         health = Math.min(100, health + 50);
-        speedBoostTimer = 12.0; // 12 seconds of speed boost
+        speedBoostTimer = 12.0;
         playSound(1050, 'triangle', 0.4);
         triggerHaptic('both', 0.8, 200);
       }
@@ -797,7 +775,7 @@
         }
 
         if (source.handedness === 'left') {
-          let multiplier = (1 + speedUpgradeLevel * 0.2) * (speedBoostTimer > 0 ? 1.5 : 1.0);
+          let multiplier = speedBoostTimer > 0 ? 1.5 : 1.0;
           const currentSpeed = (BASE_MOVE_SPEED + armSwingSpeedBoost) * multiplier;
 
           const forwardDir = new THREE.Vector3();
@@ -903,26 +881,12 @@
       const playerPos = cameraGroup.position.clone();
       const playerSafe = isInsideSafeZone(playerPos.x, playerPos.z);
 
-      // Upgrade Altar interactions inside house
-      upgradeAltars.forEach(altar => {
-        const dist = Math.hypot(playerPos.x - altar.x, playerPos.z - altar.z);
-        if (dist < 1.8) {
-          if (crystalsCollected >= 2) {
-            crystalsCollected -= 2;
-            damageMultiplier += 0.5;
-            speedUpgradeLevel += 1;
-            playSound(1200, 'sine', 0.5);
-            triggerHaptic('both', 0.9, 300);
-          }
-        }
-      });
-
       for (let i = eyeMonsters.length - 1; i >= 0; i--) {
         const eye = eyeMonsters[i];
         const distToSword = currSwordWorldPos.distanceTo(eye.position);
 
         if (distToSword < 2.2 && swordVelocity > 0.035) {
-          eye.userData.hp -= 1 * damageMultiplier;
+          eye.userData.hp -= 1;
           playSound(260, 'sawtooth', 0.15);
           triggerHaptic('right', 0.9, 120);
 
@@ -1037,12 +1001,11 @@
     function update2DUI() {
       const ui = document.getElementById('objective-ui');
       const playerSafe = isInsideSafeZone(cameraGroup.position.x, cameraGroup.position.z);
-      ui.innerText = `HEALTH: ${Math.round(health)} | HUNGER: ${Math.round(hunger)} | CRYSTALS: ${crystalsCollected} (A-Btn: Consume | Altar: Upgrade) | DAY ${daysSurvived}`;
+      ui.innerText = `HEALTH: ${Math.round(health)} | HUNGER: ${Math.round(hunger)} | CRYSTALS: ${crystalsCollected} (A-Btn: Consume) | DAY ${daysSurvived}`;
       ui.style.color = playerSafe ? '#00ffcc' : (isNight ? '#ff4444' : '#00ffff');
     }
 
     function onEnterVR() {
-      // Ensure audio playback starts on user interaction if restricted by browser policies
       const bgAudio = document.getElementById('bg-music');
       if (bgAudio && !isNight) {
         bgAudio.play().catch(e => console.log("Audio play blocked:", e));
@@ -1092,10 +1055,6 @@
       dreamCrystals.forEach(c => {
         c.mesh.rotation.y += 0.025;
         c.mesh.position.y += Math.sin(now * 0.003) * 0.0015;
-      });
-
-      upgradeAltars.forEach(a => {
-        a.mesh.rotation.y += 0.03;
       });
 
       foodApples.forEach(a => a.mesh.rotation.y += 0.015);
