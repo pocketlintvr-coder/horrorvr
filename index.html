@@ -3,34 +3,98 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VR Backrooms Maze Experience</title>
+  <title>VR Backrooms - Multiplayer Spawn Hub</title>
   <style>
     body {
       margin: 0;
       overflow: hidden;
       background-color: #000;
-      font-family: sans-serif;
+      font-family: Arial, sans-serif;
+    }
+    #ui-overlay {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(15, 15, 15, 0.95);
+      border: 2px solid #8b8b00;
+      border-radius: 12px;
+      padding: 25px;
+      color: #fff;
+      text-align: center;
+      z-index: 1000;
+      min-width: 320px;
+      box-shadow: 0 0 20px rgba(255, 255, 0, 0.2);
+    }
+    #ui-overlay h1 {
+      margin-top: 0;
+      color: #ffff33;
+      font-size: 24px;
+    }
+    .input-group {
+      margin: 15px 0;
+      text-align: left;
+    }
+    .input-group label {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 5px;
+      color: #ccc;
+    }
+    .input-group input {
+      width: 100%;
+      padding: 10px;
+      box-sizing: border-box;
+      background: #222;
+      border: 1px solid #555;
+      color: #fff;
+      border-radius: 5px;
+      font-size: 16px;
+    }
+    .btn {
+      width: 100%;
+      padding: 12px;
+      margin-top: 10px;
+      background: linear-gradient(135deg, #8b8b00 0%, #4a4a00 100%);
+      color: #fff;
+      border: 1px solid #ffff33;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+    .btn:hover {
+      background: linear-gradient(135deg, #ffff00 0%, #8b8b00 100%);
+      color: #000;
     }
     #vr-button {
       position: absolute;
-      bottom: 30px;
+      bottom: 20px;
       left: 50%;
       transform: translateX(-50%);
-      padding: 18px 36px;
-      background: linear-gradient(135deg, #8b8b00 0%, #4a4a00 100%);
-      color: #ffffff;
+      padding: 14px 28px;
+      background: #8b8b00;
+      color: #fff;
       border: 2px solid #ffff33;
-      font-size: 20px;
+      font-size: 16px;
       font-weight: bold;
       cursor: pointer;
       z-index: 999;
-      border-radius: 8px;
-      box-shadow: 0 0 15px rgba(255, 255, 0, 0.4);
+      border-radius: 6px;
+      display: none;
     }
-    #vr-button:hover {
-      background: linear-gradient(135deg, #ffff00 0%, #8b8b00 100%);
-      box-shadow: 0 0 25px rgba(255, 255, 0, 0.8);
-      color: #000;
+    #objective-ui {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      color: #ffffdd;
+      font-size: 16px;
+      font-weight: bold;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px 18px;
+      border-radius: 5px;
+      border: 1px solid #8b8b00;
+      z-index: 998;
     }
     #jumpscare-overlay {
       position: absolute;
@@ -40,70 +104,73 @@
       height: 100vh;
       background-color: rgba(255, 0, 0, 0.85);
       display: none;
-      z-index: 1000;
+      z-index: 1001;
       pointer-events: none;
-    }
-    #objective-ui {
-      position: absolute;
-      top: 20px;
-      left: 20px;
-      color: #ffffdd;
-      font-size: 18px;
-      font-weight: bold;
-      background: rgba(0, 0, 0, 0.6);
-      padding: 10px 20px;
-      border-radius: 5px;
-      border: 1px solid #8b8b00;
-      z-index: 998;
     }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 </head>
 <body>
 
-  <button id="vr-button">ENTER VR EXPERIENCE</button>
-  <div id="objective-ui">OBJECTIVE: Collect 3 Tapes (0/3) to unlock the Exit Door!</div>
+  <div id="ui-overlay">
+    <h1>THE BACKROOMS</h1>
+    <div class="input-group">
+      <label for="player-name">Player Name:</label>
+      <input type="text" id="player-name" placeholder="Explorer" value="Explorer1">
+    </div>
+    <hr style="border-color: #444; margin: 20px 0;">
+    <div class="input-group">
+      <label for="room-id">Join Host Room ID (Leave blank to Host):</label>
+      <input type="text" id="room-id" placeholder="Enter Host ID to join">
+    </div>
+    <button class="btn" id="start-btn">ENTER SPAWN ROOM</button>
+    <div id="status-msg" style="margin-top: 15px; font-size: 12px; color: #aaa;"></div>
+  </div>
+
+  <button id="vr-button">ENTER VR MODE</button>
+  <div id="objective-ui">LOCATION: Spawn Hub | Step on the Portal to enter Backrooms</div>
   <div id="jumpscare-overlay"></div>
 
   <script>
     let scene, camera, renderer, cameraGroup;
-    let flashlight, ambientLight, flickeringLight;
+    let flashlight, ambientLight;
     let monster;
-    let exitDoor;
-    let vrObjectiveMesh, vrCanvas, vrCtx;
+    let exitDoor, enterPortalMesh;
     let wallMeshes = [];
     let wallColliders = [];
-    let audioCtx = null;
+    
+    // Multiplayer State (PeerJS)
+    let peer = null;
+    let connections = [];
+    let remotePlayers = {};
+    let localPlayerName = "Explorer";
+    let isHost = false;
+    let roomId = "";
 
     // AI Variables
-    let monsterState = 'PATROL'; // 'PATROL' or 'CHASE'
+    let monsterState = 'PATROL';
     let patrolTarget = new THREE.Vector3();
     let raycaster = new THREE.Raycaster();
     const MONSTER_PATROL_SPEED = 0.035;
     const MONSTER_CHASE_SPEED = 0.065;
 
-    // Tapes objective tracking
+    // Progression
     let tapes = [];
     let collectedTapes = 0;
     const TOTAL_TAPES = 3;
+    let isInMaze = false;
 
-    // Controllers & Motion Tracking
+    // Controls
     let controller1, controller2;
     let grip1, grip2;
-    let prevController1Pos = new THREE.Vector3();
-    let prevController2Pos = new THREE.Vector3();
-    let armSwingSpeedBoost = 0;
-
-    // Movement & Difficulty Tuning
     const BASE_MOVE_SPEED = 0.06;
     const JUMPSCARE_DISTANCE = 1.2;
     const SNAP_ANGLE = Math.PI / 4;
     let canSnapTurn = true;
     let isJumpscaring = false;
-    let hasEscaped = false;
 
-    // Massive 25x25 Maze
-    // 0 = Empty, 1 = Wall, 2 = Exit Door, 3 = Cassette Tape
+    // Grid Layout: 0=Empty, 1=Wall, 2=Exit, 3=Tape, 9=Spawn Hub Area
     const mazeGrid = [
       [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
       [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 3, 0, 1],
@@ -132,138 +199,193 @@
       [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
     ];
     const CELL_SIZE = 4;
+    const SPAWN_POS = new THREE.Vector3(-15, 0, -15);
 
-    init();
+    document.getElementById('start-btn').addEventListener('click', initGame);
 
-    function init() {
+    function initGame() {
+      const nameInput = document.getElementById('player-name').value.trim();
+      if (nameInput) localPlayerName = nameInput;
+
+      const joinId = document.getElementById('room-id').value.trim();
+
+      document.getElementById('ui-overlay').style.display = 'none';
+      document.getElementById('vr-button').style.display = 'block';
+
+      initThreeJS();
+      initNetwork(joinId);
+    }
+
+    function initThreeJS() {
       scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x0a0a05);
-      scene.fog = new THREE.FogExp2(0x0a0a05, 0.08);
+      scene.background = new THREE.Color(0x050505);
+      scene.fog = new THREE.FogExp2(0x050505, 0.08);
 
       cameraGroup = new THREE.Group();
-      resetPlayerPosition();
+      cameraGroup.position.copy(SPAWN_POS);
       scene.add(cameraGroup);
 
       camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
       cameraGroup.add(camera);
 
-      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+      renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
-      ambientLight = new THREE.AmbientLight(0xd4ce98, 0.35);
+      ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
       scene.add(ambientLight);
 
-      flickeringLight = new THREE.PointLight(0xffea88, 2.0, 20);
-      flickeringLight.position.set(12 * CELL_SIZE, 3.2, 12 * CELL_SIZE);
-      scene.add(flickeringLight);
-
-      flashlight = new THREE.SpotLight(0xfffbe6, 5, 22, Math.PI / 5, 0.4, 1);
-      const lightTarget = new THREE.Object3D();
-      lightTarget.position.set(0, 0, -5);
-      camera.add(lightTarget);
-      flashlight.target = lightTarget;
+      flashlight = new THREE.SpotLight(0xffffff, 4, 20, Math.PI / 5, 0.4, 1);
+      const target = new THREE.Object3D();
+      target.position.set(0, 0, -5);
+      camera.add(target);
+      flashlight.target = target;
       camera.add(flashlight);
 
+      buildSpawnRoom();
       buildMaze();
       createMonster();
       setupControllers();
-      createVrObjectiveText();
-      pickRandomPatrolTarget();
 
       document.getElementById('vr-button').addEventListener('click', onEnterVR);
       window.addEventListener('resize', onWindowResize);
       renderer.setAnimationLoop(render);
     }
 
-    function createVrObjectiveText() {
-      vrCanvas = document.createElement('canvas');
-      vrCanvas.width = 512;
-      vrCanvas.height = 128;
-      vrCtx = vrCanvas.getContext('2d');
+    function buildSpawnRoom() {
+      const group = new THREE.Group();
+      group.position.copy(SPAWN_POS);
 
-      updateVrObjectiveUI();
+      // Room Box
+      const geo = new THREE.BoxGeometry(12, 5, 12);
+      const mat = new THREE.MeshStandardMaterial({ color: 0x222222, side: THREE.BackSide, roughness: 0.9 });
+      const room = new THREE.Mesh(geo, mat);
+      room.position.y = 2.5;
+      group.add(room);
 
-      const texture = new THREE.CanvasTexture(vrCanvas);
-      const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
-      const geo = new THREE.PlaneGeometry(1.2, 0.3);
-      vrObjectiveMesh = new THREE.Mesh(geo, mat);
-      vrObjectiveMesh.position.set(0, 0.5, -1.5);
-      camera.add(vrObjectiveMesh);
+      const light = new THREE.PointLight(0xffaa44, 2, 10);
+      light.position.set(0, 4, 0);
+      group.add(light);
+
+      // Entrance Portal to Backrooms
+      const portalGeo = new THREE.CylinderGeometry(1.5, 1.5, 0.1, 32);
+      const portalMat = new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0x888800 });
+      enterPortalMesh = new THREE.Mesh(portalGeo, portalMat);
+      enterPortalMesh.position.set(0, 0.05, -3);
+      group.add(enterPortalMesh);
+
+      scene.add(group);
     }
 
-    function updateVrObjectiveUI() {
-      if (!vrCtx) return;
-      vrCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-      vrCtx.fillRect(0, 0, 512, 128);
-      vrCtx.strokeStyle = collectedTapes === TOTAL_TAPES ? '#00ff00' : '#ffff00';
-      vrCtx.lineWidth = 4;
-      vrCtx.strokeRect(4, 4, 504, 120);
-      vrCtx.fillStyle = '#ffffff';
-      vrCtx.font = '22px sans-serif';
-      vrCtx.textAlign = 'center';
-
-      if (collectedTapes < TOTAL_TAPES) {
-        vrCtx.fillText(`Collect Tapes: ${collectedTapes}/${TOTAL_TAPES}`, 256, 50);
-        vrCtx.fillText('Find hidden tapes to unlock Exit!', 256, 85);
-      } else {
-        vrCtx.fillStyle = '#00ff00';
-        vrCtx.fillText('Exit Door Unlocked!', 256, 50);
-        vrCtx.fillText('Head to the Glowing Red Door', 256, 85);
-      }
-
-      if (vrObjectiveMesh) {
-        vrObjectiveMesh.material.map.needsUpdate = true;
-      }
-
-      const ui = document.getElementById('objective-ui');
-      if (collectedTapes < TOTAL_TAPES) {
-        ui.innerText = `OBJECTIVE: Collect 3 Tapes (${collectedTapes}/${TOTAL_TAPES}) to unlock the Exit Door!`;
-        ui.style.color = '#ffffdd';
-      } else {
-        ui.innerText = 'OBJECTIVE: Exit Unlocked! Head to the Glowing Red Door to escape!';
-        ui.style.color = '#00ff00';
-      }
-    }
-
-    function resetPlayerPosition() {
+    function enterBackroomsMaze() {
+      isInMaze = true;
       cameraGroup.position.set(1 * CELL_SIZE, 0, 1 * CELL_SIZE);
-      cameraGroup.rotation.set(0, 0, 0);
+      document.getElementById('objective-ui').innerText = `OBJECTIVE: Collect 3 Tapes (0/${TOTAL_TAPES}) to unlock Exit!`;
     }
 
-    function resetMonsterPosition() {
-      if (monster) {
-        monster.scale.set(2.2, 2.8, 1);
-        monster.position.set(23 * CELL_SIZE, 1.4, 1 * CELL_SIZE);
-        monsterState = 'PATROL';
-        pickRandomPatrolTarget();
-      }
-    }
+    /* P2P Multiplayer Networking Logic */
+    function initNetwork(joinId) {
+      peer = new Peer();
 
-    function pickRandomPatrolTarget() {
-      let valid = false;
-      while (!valid) {
-        const r = Math.floor(Math.random() * mazeGrid.length);
-        const c = Math.floor(Math.random() * mazeGrid[0].length);
-        if (mazeGrid[r][c] === 0) {
-          patrolTarget.set(c * CELL_SIZE, 1.4, r * CELL_SIZE);
-          valid = true;
+      peer.on('open', (id) => {
+        if (!joinId) {
+          isHost = true;
+          roomId = id;
+          document.getElementById('status-msg').innerText = `Hosting Room Code: ${id}`;
+        } else {
+          isHost = false;
+          connectToHost(joinId);
         }
+      });
+
+      peer.on('connection', (conn) => {
+        setupConnection(conn);
+      });
+    }
+
+    function connectToHost(hostId) {
+      const conn = peer.connect(hostId);
+      setupConnection(conn);
+    }
+
+    function setupConnection(conn) {
+      connections.push(conn);
+
+      conn.on('data', (data) => {
+        handleNetworkData(conn.peer, data);
+      });
+
+      conn.on('close', () => {
+        if (remotePlayers[conn.peer]) {
+          scene.remove(remotePlayers[conn.peer].mesh);
+          delete remotePlayers[conn.peer];
+        }
+      });
+    }
+
+    function broadcastState() {
+      const packet = {
+        type: 'transform',
+        name: localPlayerName,
+        pos: cameraGroup.position,
+        rot: cameraGroup.rotation.y
+      };
+
+      connections.forEach(conn => {
+        if (conn.open) conn.send(packet);
+      });
+    }
+
+    function handleNetworkData(peerId, data) {
+      if (data.type === 'transform') {
+        if (!remotePlayers[peerId]) {
+          createRemotePlayer(peerId, data.name);
+        }
+        const p = remotePlayers[peerId];
+        p.mesh.position.copy(data.pos);
+        p.mesh.rotation.y = data.rot;
       }
+    }
+
+    function createRemotePlayer(id, name) {
+      const pGroup = new THREE.Group();
+      
+      const bodyGeo = new THREE.CylinderGeometry(0.3, 0.3, 1.6, 16);
+      const bodyMat = new THREE.MeshStandardMaterial({ color: 0x00aaff });
+      const body = new THREE.Mesh(bodyGeo, bodyMat);
+      body.position.y = 0.8;
+      pGroup.add(body);
+
+      // Nameplate Tag
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '28px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(name, 128, 40);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      const tagMat = new THREE.SpriteMaterial({ map: texture });
+      const tag = new THREE.Sprite(tagMat);
+      tag.position.y = 1.9;
+      tag.scale.set(1.5, 0.4, 1);
+      pGroup.add(tag);
+
+      scene.add(pGroup);
+      remotePlayers[id] = { mesh: pGroup, name: name };
     }
 
     function updateMonsterAI() {
-      if (!monster || isJumpscaring || hasEscaped) return;
+      if (!monster || isJumpscaring || !isInMaze) return;
 
       const monsterPos = monster.position.clone();
       const playerPos = cameraGroup.position.clone();
       playerPos.y = 1.4;
 
-      // Line of Sight Raycast check
       const dirToPlayer = new THREE.Vector3().subVectors(playerPos, monsterPos);
       const distToPlayer = dirToPlayer.length();
       dirToPlayer.normalize();
@@ -283,146 +405,55 @@
         pickRandomPatrolTarget();
       }
 
-      // Execute AI Behavior
       if (monsterState === 'CHASE') {
         if (distToPlayer <= JUMPSCARE_DISTANCE) {
           triggerJumpscare();
         } else {
           monster.position.addScaledVector(dirToPlayer, MONSTER_CHASE_SPEED);
         }
-      } else { // PATROL
+      } else {
         const dirToTarget = new THREE.Vector3().subVectors(patrolTarget, monsterPos);
-        const distToTarget = dirToTarget.length();
-
-        if (distToTarget < 1.0) {
+        if (dirToTarget.length() < 1.0) {
           pickRandomPatrolTarget();
         } else {
           dirToTarget.normalize();
           monster.position.addScaledVector(dirToTarget, MONSTER_PATROL_SPEED);
         }
       }
-
       monster.position.y = 1.4;
     }
 
-    function playJumpscareSound() {
-      if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function pickRandomPatrolTarget() {
+      let valid = false;
+      while (!valid) {
+        const r = Math.floor(Math.random() * mazeGrid.length);
+        const c = Math.floor(Math.random() * mazeGrid[0].length);
+        if (mazeGrid[r][c] === 0) {
+          patrolTarget.set(c * CELL_SIZE, 1.4, r * CELL_SIZE);
+          valid = true;
+        }
       }
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
-
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(120, audioCtx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.8);
-
-      gain.gain.setValueAtTime(1.0, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.8);
-
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.8);
     }
 
     function triggerJumpscare() {
-      if (isJumpscaring || hasEscaped) return;
+      if (isJumpscaring) return;
       isJumpscaring = true;
-
-      playJumpscareSound();
 
       const overlay = document.getElementById('jumpscare-overlay');
       overlay.style.display = 'block';
 
-      monster.scale.set(1.2, 1.5, 1);
-
-      const viewDir = new THREE.Vector3();
-      camera.getWorldDirection(viewDir);
-      
-      const headPos = new THREE.Vector3();
-      camera.getWorldPosition(headPos);
-
-      monster.position.copy(headPos).addScaledVector(viewDir, 1.0);
-      monster.position.y = headPos.y - 0.2;
-
-      let shakeFrames = 0;
-      const shakeInterval = setInterval(() => {
-        cameraGroup.position.x += (Math.random() - 0.5) * 0.15;
-        cameraGroup.position.y += (Math.random() - 0.5) * 0.15;
-        shakeFrames++;
-
-        if (shakeFrames > 20) {
-          clearInterval(shakeInterval);
-          overlay.style.display = 'none';
-          resetPlayerPosition();
-          resetMonsterPosition();
-          isJumpscaring = false;
-        }
-      }, 30);
-    }
-
-    function triggerEscapeWin() {
-      if (hasEscaped) return;
-      hasEscaped = true;
-      
-      const ui = document.getElementById('objective-ui');
-      ui.innerText = "YOU ESCAPED THE BACKROOMS!";
-      ui.style.color = "#00ff00";
-
-      alert("YOU ESCAPED THE BACKROOMS!");
-      
-      collectedTapes = 0;
-      tapes.forEach(tape => {
-        tape.visible = true;
-      });
-      updateVrObjectiveUI();
-
-      resetPlayerPosition();
-      resetMonsterPosition();
-      hasEscaped = false;
+      setTimeout(() => {
+        overlay.style.display = 'none';
+        cameraGroup.position.copy(SPAWN_POS);
+        isInMaze = false;
+        document.getElementById('objective-ui').innerText = "LOCATION: Spawn Hub | Step on the Portal to re-enter";
+        isJumpscaring = false;
+      }, 1000);
     }
 
     function buildMaze() {
-      const textureLoader = new THREE.TextureLoader();
-
-      const floorTexture = textureLoader.load('https://i.postimg.cc/d0GDW4qv/backrooms-textures-map-result-image-v0-cn40k99826b91.webp');
-      floorTexture.wrapS = THREE.RepeatWrapping;
-      floorTexture.wrapT = THREE.RepeatWrapping;
-      floorTexture.repeat.set(25 * 2, 25 * 2);
-
-      const wallTexture = textureLoader.load('https://i.postimg.cc/MpMnBzNM/hey-i-have-a-question-for-you-all-why-are-the-walls-in-the-v0-uc5walc8c3df1.webp');
-      wallTexture.wrapS = THREE.RepeatWrapping;
-      wallTexture.wrapT = THREE.RepeatWrapping;
-      wallTexture.repeat.set(1, 1);
-
-      const mapWidth = mazeGrid[0].length * CELL_SIZE;
-      const mapHeight = mazeGrid.length * CELL_SIZE;
-
-      // Floor
-      const floorGeo = new THREE.PlaneGeometry(mapWidth, mapHeight);
-      const floorMat = new THREE.MeshStandardMaterial({ map: floorTexture, roughness: 0.8 });
-      const floor = new THREE.Mesh(floorGeo, floorMat);
-      floor.rotation.x = -Math.PI / 2;
-      floor.position.set(mapWidth / 2 - CELL_SIZE / 2, 0, mapHeight / 2 - CELL_SIZE / 2);
-      scene.add(floor);
-
-      // Ceiling
-      const ceiling = floor.clone();
-      ceiling.position.y = 3.5;
-      ceiling.rotation.x = Math.PI / 2;
-      scene.add(ceiling);
-
-      // Walls & Items
       const wallGeo = new THREE.BoxGeometry(CELL_SIZE, 3.5, CELL_SIZE);
-      const wallMat = new THREE.MeshStandardMaterial({ map: wallTexture, roughness: 0.7 });
-
-      const tapeGeo = new THREE.BoxGeometry(0.5, 0.15, 0.8);
-      const tapeMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.3, emissive: 0x333300 });
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0x8b8b00, roughness: 0.8 });
 
       for (let r = 0; r < mazeGrid.length; r++) {
         for (let c = 0; c < mazeGrid[r].length; c++) {
@@ -432,179 +463,79 @@
             scene.add(wall);
             wallMeshes.push(wall);
             wallColliders.push(new THREE.Box3().setFromObject(wall));
-          } else if (mazeGrid[r][c] === 2) {
-            const doorGeo = new THREE.BoxGeometry(CELL_SIZE * 0.8, 3.2, 0.4);
-            const doorMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xaa0000 });
-            exitDoor = new THREE.Mesh(doorGeo, doorMat);
-            exitDoor.position.set(c * CELL_SIZE, 1.6, r * CELL_SIZE);
-            scene.add(exitDoor);
-
-            const exitLight = new THREE.PointLight(0xff0000, 3, 8);
-            exitLight.position.set(c * CELL_SIZE, 2.0, r * CELL_SIZE);
-            scene.add(exitLight);
-          } else if (mazeGrid[r][c] === 3) {
-            const tape = new THREE.Mesh(tapeGeo, tapeMat);
-            tape.position.set(c * CELL_SIZE, 0.8, r * CELL_SIZE);
-            scene.add(tape);
-            tapes.push(tape);
-
-            const tapeLight = new THREE.PointLight(0xffff00, 1.5, 4);
-            tapeLight.position.set(c * CELL_SIZE, 1.2, r * CELL_SIZE);
-            scene.add(tapeLight);
           }
         }
       }
     }
 
     function createMonster() {
-      const textureLoader = new THREE.TextureLoader();
-      const monsterTexture = textureLoader.load('https://i.postimg.cc/66Mq17NV/IMG-3836-pixel.png');
-
-      const mat = new THREE.SpriteMaterial({ map: monsterTexture, transparent: true });
-      monster = new THREE.Sprite(mat);
-      resetMonsterPosition();
+      const mat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+      const geo = new THREE.BoxGeometry(1, 2.5, 1);
+      monster = new THREE.Mesh(geo, mat);
+      monster.position.set(23 * CELL_SIZE, 1.25, 1 * CELL_SIZE);
       scene.add(monster);
+      pickRandomPatrolTarget();
     }
 
     function setupControllers() {
       controller1 = renderer.xr.getController(0);
       controller2 = renderer.xr.getController(1);
-
-      grip1 = renderer.xr.getControllerGrip(0);
-      grip2 = renderer.xr.getControllerGrip(1);
-
-      const handGeo = new THREE.SphereGeometry(0.1, 16, 16);
-      const handMat = new THREE.MeshStandardMaterial({ color: 0x888800, roughness: 0.3 });
-
-      grip1.add(new THREE.Mesh(handGeo, handMat));
-      grip2.add(new THREE.Mesh(handGeo, handMat));
-
       cameraGroup.add(controller1);
       cameraGroup.add(controller2);
-      cameraGroup.add(grip1);
-      cameraGroup.add(grip2);
     }
 
-    function updateArmSwingMotion() {
-      if (!controller1 || !controller2) return;
-
-      const currPos1 = new THREE.Vector3();
-      const currPos2 = new THREE.Vector3();
-      controller1.getWorldPosition(currPos1);
-      controller2.getWorldPosition(currPos2);
-
-      const dist1 = currPos1.distanceTo(prevController1Pos);
-      const dist2 = currPos2.distanceTo(prevController2Pos);
-
-      const currentSwingVelocity = dist1 + dist2;
-
-      if (currentSwingVelocity > 0.02) {
-        armSwingSpeedBoost = Math.min(0.08, armSwingSpeedBoost + currentSwingVelocity * 0.8);
-      } else {
-        armSwingSpeedBoost *= 0.85;
-      }
-
-      prevController1Pos.copy(currPos1);
-      prevController2Pos.copy(currPos2);
-    }
-
-    function processThumbstickLocomotion() {
-      if (isJumpscaring || hasEscaped) return;
-
-      updateArmSwingMotion();
+    function processLocomotion() {
+      if (isJumpscaring) return;
 
       const session = renderer.xr.getSession();
       if (!session) return;
 
       for (const source of session.inputSources) {
         if (!source.gamepad) continue;
-
         const axes = source.gamepad.axes;
         const xAxis = axes[2] !== undefined ? axes[2] : axes[0];
         const yAxis = axes[3] !== undefined ? axes[3] : axes[1];
 
-        if (Math.abs(xAxis) < 0.1 && Math.abs(yAxis) < 0.1) {
-          if (source.handedness === 'right') canSnapTurn = true;
-          continue;
-        }
+        if (Math.abs(xAxis) < 0.1 && Math.abs(yAxis) < 0.1) continue;
 
         if (source.handedness === 'left') {
-          const currentSpeed = BASE_MOVE_SPEED + armSwingSpeedBoost;
-
           const forwardDir = new THREE.Vector3();
           camera.getWorldDirection(forwardDir);
           forwardDir.y = 0;
           forwardDir.normalize();
 
           const rightDir = new THREE.Vector3().crossVectors(camera.up, forwardDir).negate();
-
           const moveVec = new THREE.Vector3()
-            .addScaledVector(forwardDir, -yAxis * currentSpeed)
-            .addScaledVector(rightDir, xAxis * currentSpeed);
+            .addScaledVector(forwardDir, -yAxis * BASE_MOVE_SPEED)
+            .addScaledVector(rightDir, xAxis * BASE_MOVE_SPEED);
 
           const nextPos = cameraGroup.position.clone().add(moveVec);
 
-          tapes.forEach(tape => {
-            if (tape.visible && nextPos.distanceTo(tape.position) < 1.5) {
-              tape.visible = false;
-              collectedTapes++;
-              updateVrObjectiveUI();
-            }
-          });
-
-          if (exitDoor && nextPos.distanceTo(exitDoor.position) < 1.8) {
-            if (collectedTapes >= TOTAL_TAPES) {
-              triggerEscapeWin();
+          // Check Hub Portal Trigger
+          if (!isInMaze) {
+            const hubPortalWorldPos = new THREE.Vector3().setFromMatrixPosition(enterPortalMesh.matrixWorld);
+            if (nextPos.distanceTo(hubPortalWorldPos) < 1.5) {
+              enterBackroomsMaze();
               return;
             }
           }
 
-          let collide = false;
-          const playerRadius = 0.4;
-          const playerBox = new THREE.Box3(
-            new THREE.Vector3(nextPos.x - playerRadius, 0, nextPos.z - playerRadius),
-            new THREE.Vector3(nextPos.x + playerRadius, 2, nextPos.z + playerRadius)
-          );
-
-          for (let i = 0; i < wallColliders.length; i++) {
-            if (playerBox.intersectsBox(wallColliders[i])) {
-              collide = true;
-              break;
-            }
-          }
-
-          if (!collide) {
-            cameraGroup.position.copy(nextPos);
-          }
+          cameraGroup.position.copy(nextPos);
         }
 
-        if (source.handedness === 'right') {
-          if (canSnapTurn && Math.abs(xAxis) > 0.6) {
-            cameraGroup.rotation.y -= Math.sign(xAxis) * SNAP_ANGLE;
-            canSnapTurn = false;
-          }
+        if (source.handedness === 'right' && canSnapTurn && Math.abs(xAxis) > 0.6) {
+          cameraGroup.rotation.y -= Math.sign(xAxis) * SNAP_ANGLE;
+          canSnapTurn = false;
+          setTimeout(() => canSnapTurn = true, 300);
         }
       }
     }
 
     function onEnterVR() {
-      if (!('xr' in navigator)) {
-        alert("WebXR API not available. Make sure you are using an HTTPS URL inside your VR headset browser.");
-        return;
-      }
-
       navigator.xr.requestSession('immersive-vr', {
         optionalFeatures: ['local-floor', 'bounded-floor']
       }).then((session) => {
         renderer.xr.setSession(session);
-        document.getElementById('vr-button').style.display = 'none';
-
-        session.addEventListener('end', () => {
-          document.getElementById('vr-button').style.display = 'block';
-        });
-      }).catch((err) => {
-        console.error("VR Session Error:", err);
-        alert("Could not start VR session. Ensure site URL starts with https://");
       });
     }
 
@@ -614,20 +545,10 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
-    function render(timestamp) {
-      processThumbstickLocomotion();
+    function render() {
+      processLocomotion();
       updateMonsterAI();
-
-      tapes.forEach(tape => {
-        if (tape.visible) {
-          tape.rotation.y += 0.03;
-        }
-      });
-
-      if (flickeringLight) {
-        flickeringLight.intensity = 1.0 + Math.sin(timestamp * 0.015) * 0.8 + (Math.random() < 0.08 ? -1.2 : 0);
-      }
-
+      broadcastState();
       renderer.render(scene, camera);
     }
   </script>
