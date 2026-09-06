@@ -26,17 +26,9 @@
       z-index: 999;
       border-radius: 4px;
     }
-    #vr-button:hover {
-      background: #ff0000;
-    }
-    #vr-button:disabled {
-      background: #333;
-      border-color: #555;
-      color: #888;
-      cursor: not-allowed;
-    }
+    #vr-button:hover { background: #ff0000; }
+    #vr-button:disabled { background: #333; border-color: #555; color: #888; cursor: not-allowed; }
   </style>
-  <!-- Three.js Library -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
@@ -45,117 +37,151 @@
 
   <script>
     let scene, camera, renderer, flashlight;
-    let monster;
+    let monster, cameraGroup;
+    
+    // VR Controllers & Locomotion Setup
+    let controller1, controller2;
+    const prevControllerPos = [new THREE.Vector3(), new THREE.Vector3()];
+    const controllerPos = [new THREE.Vector3(), new THREE.Vector3()];
+    const handRadius = 0.15; // Arm reach collision floor height
 
     init();
 
     function init() {
-      // 1. Create Scene & Fog for horror atmosphere
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x020202);
       scene.fog = new THREE.FogExp2(0x020202, 0.15);
 
-      // 2. Camera Setup
-      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
-      camera.position.set(0, 1.6, 0); // Average eye level in meters
+      // Camera Group for physics movement
+      cameraGroup = new THREE.Group();
+      scene.add(cameraGroup);
 
-      // 3. Renderer Setup with WebXR Enabled
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+      cameraGroup.add(camera);
+
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
-      // 4. Lighting (Minimal Ambient + Player Flashlight)
+      // Lighting & Flashlight
       const ambientLight = new THREE.AmbientLight(0x050508, 0.2);
       scene.add(ambientLight);
 
       flashlight = new THREE.SpotLight(0xffffff, 2, 15, Math.PI / 6, 0.5, 1);
-      flashlight.position.set(0, 1.6, 0);
-      
-      // Target for flashlight direction
       const lightTarget = new THREE.Object3D();
-      lightTarget.position.set(0, 1.6, -5);
-      scene.add(lightTarget);
-      flashlight.target = lightTarget;
-
-      // Attach flashlight to camera
-      camera.add(flashlight);
+      lightTarget.position.set(0, 0, -5);
       camera.add(lightTarget);
-      scene.add(camera);
+      flashlight.target = lightTarget;
+      camera.add(flashlight);
 
-      // 5. Environment (Creepy Dark Hallway)
+      // World Environment & Monster
       createEnvironment();
-
-      // 6. Spawn Horror Entity
       createMonster();
 
-      // 7. WebXR Setup
+      // Controller Setup for Gorilla Tag Movement
+      setupControllers();
+
       setupVR();
-
-      // 8. Window Resize Listener
       window.addEventListener('resize', onWindowResize);
-
-      // 9. WebXR Animation Loop
       renderer.setAnimationLoop(render);
     }
 
+    function setupControllers() {
+      controller1 = renderer.xr.getController(0);
+      controller2 = renderer.xr.getController(1);
+
+      cameraGroup.add(controller1);
+      cameraGroup.add(controller2);
+
+      // Visual Hand Representation (Simple spheres)
+      const handGeo = new THREE.SphereGeometry(handRadius, 8, 8);
+      const handMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.5 });
+
+      controller1.add(new THREE.Mesh(handGeo, handMat));
+      controller2.add(new THREE.Mesh(handGeo, handMat));
+    }
+
+    function updateGorillaMovement() {
+      const controllers = [controller1, controller2];
+
+      controllers.forEach((controller, idx) => {
+        if (!controller) return;
+
+        // Get world position of controller
+        controller.getWorldPosition(controllerPos[idx]);
+
+        // Check if hand touches or penetrates the floor plane (Y = 0)
+        if (controllerPos[idx].y <= handRadius) {
+          // Calculate movement delta relative to frame
+          const delta = new THREE.Vector3().subVectors(prevControllerPos[idx], controllerPos[idx]);
+          
+          // Apply opposite impulse force to the camera rig
+          cameraGroup.position.x += delta.x * 1.5;
+          cameraGroup.position.z += delta.z * 1.5;
+
+          // Vertical push-off height boost
+          if (delta.y > 0) {
+            cameraGroup.position.y += delta.y * 1.2;
+          }
+        }
+
+        // Apply basic floor gravity pull if airborne
+        if (cameraGroup.position.y > 0) {
+          cameraGroup.position.y = Math.max(0, cameraGroup.position.y - 0.015);
+        }
+
+        prevControllerPos[idx].copy(controllerPos[idx]);
+      });
+    }
+
     function createEnvironment() {
-      // Floor
-      const floorGeo = new THREE.PlaneGeometry(10, 50);
+      const floorGeo = new THREE.PlaneGeometry(20, 100);
       const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
       const floor = new THREE.Mesh(floorGeo, floorMat);
       floor.rotation.x = -Math.PI / 2;
       scene.add(floor);
 
-      // Ceiling
       const ceiling = floor.clone();
-      ceiling.position.y = 4;
+      ceiling.position.y = 5;
       ceiling.rotation.x = Math.PI / 2;
       scene.add(ceiling);
 
-      // Walls
       const wallMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
       
-      const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(50, 4), wallMat);
-      leftWall.position.set(-5, 2, 0);
+      const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(100, 5), wallMat);
+      leftWall.position.set(-10, 2.5, 0);
       leftWall.rotation.y = Math.PI / 2;
       scene.add(leftWall);
 
-      const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(50, 4), wallMat);
-      rightWall.position.set(5, 2, 0);
+      const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(100, 5), wallMat);
+      rightWall.position.set(10, 2.5, 0);
       rightWall.rotation.y = -Math.PI / 2;
       scene.add(rightWall);
-
-      const backWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 4), wallMat);
-      backWall.position.set(0, 2, -25);
-      scene.add(backWall);
     }
 
     function createMonster() {
       const monsterGroup = new THREE.Group();
 
-      // Shadowy Body
-      const bodyGeo = new THREE.CylinderGeometry(0.3, 0.1, 2.5, 8);
+      const bodyGeo = new THREE.CylinderGeometry(0.4, 0.2, 3, 8);
       const monsterMat = new THREE.MeshBasicMaterial({ color: 0x050505 });
       const body = new THREE.Mesh(bodyGeo, monsterMat);
-      body.position.y = 1.25;
+      body.position.y = 1.5;
       monsterGroup.add(body);
 
-      // Glowing Red Eyes
-      const eyeGeo = new THREE.SphereGeometry(0.04, 8, 8);
+      const eyeGeo = new THREE.SphereGeometry(0.05, 8, 8);
       const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
       
       const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-      leftEye.position.set(-0.1, 2.2, 0.25);
+      leftEye.position.set(-0.15, 2.5, 0.3);
       
       const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-      rightEye.position.set(0.1, 2.2, 0.25);
+      rightEye.position.set(0.15, 2.5, 0.3);
 
       monsterGroup.add(leftEye);
       monsterGroup.add(rightEye);
 
-      // Position down the hallway
-      monsterGroup.position.set(0, 0, -18);
+      monsterGroup.position.set(0, 0, -25);
       scene.add(monsterGroup);
       monster = monsterGroup;
     }
@@ -178,47 +204,18 @@
             button.textContent = 'VR NOT SUPPORTED ON THIS DEVICE';
             button.disabled = true;
           }
-        }).catch(() => {
-          button.textContent = 'ERROR CHECKING VR SUPPORT';
-          button.disabled = true;
         });
-      } else {
-        button.textContent = 'WEBXR NOT AVAILABLE';
-        button.disabled = true;
       }
     }
 
     function onEnterVR() {
-      // Primary attempt: Request local-floor reference space
       navigator.xr.requestSession('immersive-vr', {
         requiredFeatures: ['local-floor'],
-        optionalFeatures: ['bounded-floor', 'hand-tracking']
+        optionalFeatures: ['bounded-floor']
       }).then((session) => {
         renderer.xr.setSession(session);
         renderer.xr.setReferenceSpaceType('local-floor');
         document.getElementById('vr-button').style.display = 'none';
-
-        session.addEventListener('end', () => {
-          document.getElementById('vr-button').style.display = 'block';
-        });
-      }).catch((err) => {
-        console.warn("local-floor failed, attempting fallback to 'local'", err);
-
-        // Fallback attempt: Request base local reference space
-        navigator.xr.requestSession('immersive-vr', {
-          requiredFeatures: ['local']
-        }).then((session) => {
-          renderer.xr.setSession(session);
-          renderer.xr.setReferenceSpaceType('local');
-          document.getElementById('vr-button').style.display = 'none';
-
-          session.addEventListener('end', () => {
-            document.getElementById('vr-button').style.display = 'block';
-          });
-        }).catch((fallbackErr) => {
-          console.error("VR Session failed:", fallbackErr);
-          alert("VR failed to start. Ensure the site is served over HTTPS (https://) or http://localhost.");
-        });
       });
     }
 
@@ -229,15 +226,16 @@
     }
 
     function render(time) {
-      // Flashlight flicker
+      // Process Arm/Gorilla Locomotion each frame
+      updateGorillaMovement();
+
       if (flashlight) {
         flashlight.intensity = 1.8 + Math.sin(time * 0.02) * 0.3 + (Math.random() < 0.05 ? -0.8 : 0);
       }
 
-      // Move creature closer over time
-      if (monster && monster.position.z < -2) {
-        monster.position.z += 0.008;
-        monster.position.x = Math.sin(time * 0.003) * 0.4;
+      if (monster && monster.position.z < cameraGroup.position.z) {
+        monster.position.z += 0.01;
+        monster.position.x = Math.sin(time * 0.003) * 0.8;
       }
 
       renderer.render(scene, camera);
