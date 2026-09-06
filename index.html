@@ -50,13 +50,12 @@
     const handPrevPos = [new THREE.Vector3(), new THREE.Vector3()];
     const handCurrPos = [new THREE.Vector3(), new THREE.Vector3()];
 
-    // REBALANCED PHYSICS CONSTANTS
+    // DIRECT LOCOMOTION PHYSICS
     const playerVelocity = new THREE.Vector3(0, 0, 0);
-    const gravity = -0.007;
-    const forwardMultiplier = 2.2; // High forward propulsion
-    const upwardMultiplier = 0.45; // Dampened vertical launch force
-    const maxJumpSpeed = 0.04;     // Strict leap height ceiling
-    const friction = 0.88;         // Smooth ground slide friction
+    const gravity = -0.008;
+    const forwardMultiplier = 3.8; // High forward push
+    const upwardMultiplier = 0.2;  // Minimized upward bounce
+    const friction = 0.85;         // Quick stopping friction
 
     init();
 
@@ -212,7 +211,7 @@
       grip1 = renderer.xr.getControllerGrip(0);
       grip2 = renderer.xr.getControllerGrip(1);
 
-      const handGeo = new THREE.SphereGeometry(0.14, 16, 16);
+      const handGeo = new THREE.SphereGeometry(0.18, 16, 16);
       const handMat = new THREE.MeshStandardMaterial({ color: 0xcc1111, roughness: 0.3, emissive: 0x220000 });
 
       grip1.add(new THREE.Mesh(handGeo, handMat));
@@ -228,7 +227,6 @@
 
       scene.updateMatrixWorld(true);
 
-      // Get current facing direction vector from headset
       const forwardDir = new THREE.Vector3();
       camera.getWorldDirection(forwardDir);
       forwardDir.y = 0;
@@ -238,11 +236,6 @@
 
       const grips = [grip1, grip2];
 
-      // DYNAMIC FLOOR HITBOX BASED ON HEADSET HEIGHT
-      const headsetWorldPos = new THREE.Vector3();
-      camera.getWorldPosition(headsetWorldPos);
-      const floorThreshold = headsetWorldPos.y - 1.1; // Contact floor when hands extend down
-
       for (let i = 0; i < 2; i++) {
         const grip = grips[i];
         if (!grip) continue;
@@ -251,39 +244,27 @@
 
         const handDelta = new THREE.Vector3().subVectors(handPrevPos[i], handCurrPos[i]);
 
-        // CHECK REAL GROUND CONTACT
-        if (handCurrPos[i].y <= floorThreshold) {
+        // FLOOR CONTACT CHECK (Triggers whenever hand sphere enters lower floor threshold)
+        if (handCurrPos[i].y <= cameraGroup.position.y + 0.35) {
           
-          // Project hand swing against headset view orientation
           const deltaForward = handDelta.dot(forwardDir);
           const deltaRight = handDelta.dot(rightDir);
 
-          // Pushing hands backward/downward propels player forward
-          if (handDelta.length() > 0.003) {
-            
-            // Forward / Strafe Propulsion
+          // Pushing arm back launches body forward
+          if (handDelta.length() > 0.002) {
             playerVelocity.x += (forwardDir.x * deltaForward + rightDir.x * deltaRight) * forwardMultiplier;
             playerVelocity.z += (forwardDir.z * deltaForward + rightDir.z * deltaRight) * forwardMultiplier;
 
-            // Controlled upward bounce on slap down
             if (handDelta.y > 0) {
-              const upwardImpulse = Math.min(handDelta.y * upwardMultiplier, maxJumpSpeed);
-              playerVelocity.y += upwardImpulse;
+              playerVelocity.y += Math.min(handDelta.y * upwardMultiplier, 0.02);
             }
           }
-        }
-
-        // WALL BOUNCE CHECKS
-        if (handCurrPos[i].x <= -5.5 && handDelta.x < 0) {
-          playerVelocity.x += -handDelta.x * forwardMultiplier;
-        } else if (handCurrPos[i].x >= 5.5 && handDelta.x > 0) {
-          playerVelocity.x += -handDelta.x * forwardMultiplier;
         }
 
         handPrevPos[i].copy(handCurrPos[i]);
       }
 
-      // APPLY CONTINUOUS VELOCITY & GRAVITY
+      // APPLY CONTINUOUS MOVEMENT
       cameraGroup.position.add(playerVelocity);
 
       if (cameraGroup.position.y > 0) {
@@ -296,7 +277,6 @@
       playerVelocity.x *= friction;
       playerVelocity.z *= friction;
 
-      // KEEP PLAYER INSIDE ROOM BOUNDS
       cameraGroup.position.x = Math.max(-5.2, Math.min(5.2, cameraGroup.position.x));
       cameraGroup.position.z = Math.max(-35, Math.min(8, cameraGroup.position.z));
     }
