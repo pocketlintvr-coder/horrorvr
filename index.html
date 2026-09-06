@@ -50,12 +50,13 @@
     const handPrevPos = [new THREE.Vector3(), new THREE.Vector3()];
     const handCurrPos = [new THREE.Vector3(), new THREE.Vector3()];
 
-    // TUNED PHYSICS VARIABLES
+    // REBALANCED PHYSICS CONSTANTS
     const playerVelocity = new THREE.Vector3(0, 0, 0);
     const gravity = -0.007;
-    const bounceElasticity = 0.7; // Reduced for grounded, realistic leaps
-    const maxJumpSpeed = 0.05;    // Prevents rocket launches into ceiling
-    const friction = 0.92;        // Controlled ground slide
+    const forwardMultiplier = 2.2; // High forward propulsion
+    const upwardMultiplier = 0.45; // Dampened vertical launch force
+    const maxJumpSpeed = 0.04;     // Strict leap height ceiling
+    const friction = 0.88;         // Smooth ground slide friction
 
     init();
 
@@ -227,7 +228,20 @@
 
       scene.updateMatrixWorld(true);
 
+      // Get current facing direction vector from headset
+      const forwardDir = new THREE.Vector3();
+      camera.getWorldDirection(forwardDir);
+      forwardDir.y = 0;
+      forwardDir.normalize();
+
+      const rightDir = new THREE.Vector3().crossVectors(camera.up, forwardDir).negate();
+
       const grips = [grip1, grip2];
+
+      // DYNAMIC FLOOR HITBOX BASED ON HEADSET HEIGHT
+      const headsetWorldPos = new THREE.Vector3();
+      camera.getWorldPosition(headsetWorldPos);
+      const floorThreshold = headsetWorldPos.y - 1.1; // Contact floor when hands extend down
 
       for (let i = 0; i < 2; i++) {
         const grip = grips[i];
@@ -237,32 +251,39 @@
 
         const handDelta = new THREE.Vector3().subVectors(handPrevPos[i], handCurrPos[i]);
 
-        // ADJUSTED FLOOR HITBOX REACH LEVEL
-        const floorY = cameraGroup.position.y + 0.85; 
+        // CHECK REAL GROUND CONTACT
+        if (handCurrPos[i].y <= floorThreshold) {
+          
+          // Project hand swing against headset view orientation
+          const deltaForward = handDelta.dot(forwardDir);
+          const deltaRight = handDelta.dot(rightDir);
 
-        if (handCurrPos[i].y <= floorY) {
-          if (handDelta.y > 0.002 || Math.abs(handDelta.x) > 0.002 || Math.abs(handDelta.z) > 0.002) {
+          // Pushing hands backward/downward propels player forward
+          if (handDelta.length() > 0.003) {
             
-            // Scaled horizontal push
-            playerVelocity.x += handDelta.x * bounceElasticity;
-            playerVelocity.z += handDelta.z * bounceElasticity;
-            
-            // Capped vertical leap force
-            const verticalForce = Math.min(handDelta.y * bounceElasticity, maxJumpSpeed);
-            playerVelocity.y += Math.max(verticalForce, 0.01);
+            // Forward / Strafe Propulsion
+            playerVelocity.x += (forwardDir.x * deltaForward + rightDir.x * deltaRight) * forwardMultiplier;
+            playerVelocity.z += (forwardDir.z * deltaForward + rightDir.z * deltaRight) * forwardMultiplier;
+
+            // Controlled upward bounce on slap down
+            if (handDelta.y > 0) {
+              const upwardImpulse = Math.min(handDelta.y * upwardMultiplier, maxJumpSpeed);
+              playerVelocity.y += upwardImpulse;
+            }
           }
         }
 
         // WALL BOUNCE CHECKS
         if (handCurrPos[i].x <= -5.5 && handDelta.x < 0) {
-          playerVelocity.x += -handDelta.x * bounceElasticity;
+          playerVelocity.x += -handDelta.x * forwardMultiplier;
         } else if (handCurrPos[i].x >= 5.5 && handDelta.x > 0) {
-          playerVelocity.x += -handDelta.x * bounceElasticity;
+          playerVelocity.x += -handDelta.x * forwardMultiplier;
         }
 
         handPrevPos[i].copy(handCurrPos[i]);
       }
 
+      // APPLY CONTINUOUS VELOCITY & GRAVITY
       cameraGroup.position.add(playerVelocity);
 
       if (cameraGroup.position.y > 0) {
@@ -275,6 +296,7 @@
       playerVelocity.x *= friction;
       playerVelocity.z *= friction;
 
+      // KEEP PLAYER INSIDE ROOM BOUNDS
       cameraGroup.position.x = Math.max(-5.2, Math.min(5.2, cameraGroup.position.x));
       cameraGroup.position.z = Math.max(-35, Math.min(8, cameraGroup.position.z));
     }
