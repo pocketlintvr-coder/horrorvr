@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VR Dreamcore Survival Experience - Infinite World</title>
+  <title>Realistic VR Dreamcore Survival</title>
   <style>
     body {
       margin: 0;
@@ -38,7 +38,7 @@
       left: 0;
       width: 100vw;
       height: 100vh;
-      background-color: rgba(255, 0, 0, 0.4);
+      background: radial-gradient(circle, transparent 60%, rgba(255, 0, 0, 0.6) 100%);
       display: none;
       z-index: 1000;
       pointer-events: none;
@@ -62,7 +62,7 @@
 </head>
 <body>
 
-  <button id="vr-button">ENTER VR SURVIVAL</button>
+  <button id="vr-button">ENTER REALISTIC VR SURVIVAL</button>
   <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | CRYSTALS: 0 | DAY 1</div>
   <div id="damage-overlay"></div>
 
@@ -88,8 +88,8 @@
 
     // Infinite World Chunk Management
     const CHUNK_SIZE = 120;
-    const CHUNK_SEGMENTS = 32;
-    const VIEW_DISTANCE = 2; // Chunks rendered in each direction
+    const CHUNK_SEGMENTS = 64; // High resolution terrain mesh
+    const VIEW_DISTANCE = 2;
     const activeChunks = new Map();
     let lastPlayerChunkX = Infinity;
     let lastPlayerChunkZ = Infinity;
@@ -110,11 +110,54 @@
     const SNAP_ANGLE = Math.PI / 4;
     let canSnapTurn = true;
 
+    // Realistic Procedural Noise Function (Perlin-like 2D Noise)
+    function MathNoise(x, z) {
+      const p = (x * 12.9898 + z * 78.233);
+      return (Math.sin(p) * 43758.5453) % 1;
+    }
+
+    function SmoothNoise(x, z) {
+      const corners = (MathNoise(x-1, z-1) + MathNoise(x+1, z-1) + MathNoise(x-1, z+1) + MathNoise(x+1, z+1)) / 16;
+      const sides = (MathNoise(x-1, z) + MathNoise(x+1, z) + MathNoise(x, z-1) + MathNoise(x, z+1)) / 8;
+      const center = MathNoise(x, z) / 4;
+      return corners + sides + center;
+    }
+
+    function InterpolatedNoise(x, z) {
+      const intX = Math.floor(x);
+      const fracX = x - intX;
+      const intZ = Math.floor(z);
+      const fracZ = z - intZ;
+
+      const v1 = SmoothNoise(intX, intZ);
+      const v2 = SmoothNoise(intX + 1, intZ);
+      const v3 = SmoothNoise(intX, intZ + 1);
+      const v4 = SmoothNoise(intX + 1, intZ + 1);
+
+      const i1 = v1 * (1 - fracX) + v2 * fracX;
+      const i2 = v3 * (1 - fracX) + v4 * fracX;
+
+      return i1 * (1 - fracZ) + i2 * fracZ;
+    }
+
+    function getTerrainHeight(x, z) {
+      // Layered Fractal Noise for Organic Hills
+      let total = 0;
+      let frequency = 0.015;
+      let amplitude = 14.0;
+      
+      total += InterpolatedNoise(x * frequency, z * frequency) * amplitude;
+      total += InterpolatedNoise(x * frequency * 2, z * frequency * 2) * (amplitude * 0.5);
+      total += Math.sin(x * 0.03) * Math.cos(z * 0.03) * 4.0; // Soft undulating swells
+
+      return total;
+    }
+
     init();
 
     function init() {
       scene = new THREE.Scene();
-      scene.fog = new THREE.FogExp2(0xaaccff, 0.007);
+      scene.fog = new THREE.FogExp2(0xaaccff, 0.005);
 
       cameraGroup = new THREE.Group();
       scene.add(cameraGroup);
@@ -128,27 +171,33 @@
       renderer.xr.enabled = true;
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      
+      // Tone Mapping for Realistic Lighting
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.0;
+
       document.body.appendChild(renderer.domElement);
 
       // Lighting Setup
-      ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+      ambientLight = new THREE.AmbientLight(0xddeeff, 0.6);
       scene.add(ambientLight);
 
-      sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
-      sunLight.position.set(100, 150, 50);
+      sunLight = new THREE.DirectionalLight(0xfff5ea, 1.5);
+      sunLight.position.set(120, 180, 80);
       sunLight.castShadow = true;
       sunLight.shadow.mapSize.width = 2048;
       sunLight.shadow.mapSize.height = 2048;
       sunLight.shadow.camera.near = 0.5;
-      sunLight.shadow.camera.far = 300;
-      const d = 80;
+      sunLight.shadow.camera.far = 400;
+      const d = 100;
       sunLight.shadow.camera.left = -d;
       sunLight.shadow.camera.right = d;
       sunLight.shadow.camera.top = d;
       sunLight.shadow.camera.bottom = -d;
+      sunLight.shadow.bias = -0.0005;
       scene.add(sunLight);
 
-      flashlight = new THREE.SpotLight(0xfffbe6, 8, 35, Math.PI / 5, 0.5, 1);
+      flashlight = new THREE.SpotLight(0xfff0dd, 10, 45, Math.PI / 6, 0.4, 1);
       const lightTarget = new THREE.Object3D();
       lightTarget.position.set(0, 0, -5);
       camera.add(lightTarget);
@@ -167,14 +216,6 @@
       document.getElementById('vr-button').addEventListener('click', onEnterVR);
       window.addEventListener('resize', onWindowResize);
       renderer.setAnimationLoop(render);
-    }
-
-    // Mathematical Terrain Generator (Noise Simulation)
-    function getTerrainHeight(x, z) {
-      const scale1 = Math.sin(x * 0.03) * Math.cos(z * 0.03) * 7.0;
-      const scale2 = Math.sin(x * 0.01) * Math.sin(z * 0.01) * 12.0;
-      const detail = Math.cos(x * 0.08 + z * 0.08) * 1.5;
-      return scale1 + scale2 + detail;
     }
 
     function resetPlayerPosition() {
@@ -196,10 +237,11 @@
     function loadTexturesAndAssets() {
       const textureLoader = new THREE.TextureLoader();
 
+      // Procedural/PBR Grass Materials setup
       customGrassTexture = textureLoader.load('https://i.postimg.cc/C1PN1FWR/Getty-Images-1407861824-ee2a308b7f134e509f4d3463653d6cfe.jpg');
       customGrassTexture.wrapS = THREE.RepeatWrapping;
       customGrassTexture.wrapT = THREE.RepeatWrapping;
-      customGrassTexture.repeat.set(12, 12);
+      customGrassTexture.repeat.set(16, 16);
 
       daySkyTexture = textureLoader.load('https://i.postimg.cc/BZzpfnTN/images-(7).jpg');
       nightSkyTexture = textureLoader.load('https://i.postimg.cc/FKGbWrFs/images-(8).jpg');
@@ -210,7 +252,7 @@
       scene.add(skySphereMesh);
     }
 
-    // Infinite Procedural Terrain Chunks
+    // Infinite Procedural Terrain Chunks with Corrected Local-to-World Height Mapping
     function updateChunks(forceUpdate = false) {
       const playerX = cameraGroup.position.x;
       const playerZ = cameraGroup.position.z;
@@ -263,66 +305,110 @@
       for (let i = 0; i < pos.count; i++) {
         const localX = pos.getX(i);
         const localZ = pos.getZ(i);
+
+        // Absolute world coordinates matching vertex locations
         const worldX = worldOffsetX + localX + CHUNK_SIZE / 2;
         const worldZ = worldOffsetZ + localZ + CHUNK_SIZE / 2;
+
         pos.setY(i, getTerrainHeight(worldX, worldZ));
       }
       geo.computeVertexNormals();
 
-      const grassMat = new THREE.MeshStandardMaterial({ map: customGrassTexture, roughness: 0.8, metalness: 0.1 });
+      const grassMat = new THREE.MeshStandardMaterial({ 
+        map: customGrassTexture, 
+        roughness: 0.7, 
+        metalness: 0.05
+      });
+
       const terrain = new THREE.Mesh(geo, grassMat);
       terrain.position.set(worldOffsetX + CHUNK_SIZE / 2, 0, worldOffsetZ + CHUNK_SIZE / 2);
       terrain.receiveShadow = true;
+      terrain.castShadow = true;
       chunkGroup.add(terrain);
 
-      // Procedurally populate chunk elements
+      // Populate chunk with assets & vegetation
       populateChunkElements(chunkGroup, worldOffsetX, worldOffsetZ);
 
       return chunkGroup;
     }
 
     function populateChunkElements(group, offsetX, offsetZ) {
-      // Deterministic random generator based on coordinates
       const pseudoRandom = (x, z) => {
-        return Math.sin(x * 12.9898 + z * 78.233) * 43758.5453 % 1;
+        return (Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
       };
 
-      const houseMat = new THREE.MeshStandardMaterial({ color: 0xfffdd0, roughness: 0.4 });
-      const roofMat = new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.6 });
+      // Realistic Detailed Liminal Houses
+      const houseMat = new THREE.MeshStandardMaterial({ color: 0xfbf8ee, roughness: 0.3, metalness: 0.1 });
+      const roofMat = new THREE.MeshStandardMaterial({ color: 0x4a3b32, roughness: 0.5 });
+      const glassMat = new THREE.MeshPhysicalMaterial({ color: 0x88ccff, roughness: 0.1, transmission: 0.8, opacity: 1, transparent: true });
 
-      // Spawn Liminal House per chunk probability
       if (Math.abs(pseudoRandom(offsetX, offsetZ)) > 0.65) {
         const hX = offsetX + 20 + Math.abs(pseudoRandom(offsetX, 0)) * (CHUNK_SIZE - 40);
         const hZ = offsetZ + 20 + Math.abs(pseudoRandom(0, offsetZ)) * (CHUNK_SIZE - 40);
         const hY = getTerrainHeight(hX, hZ);
 
         const houseGroup = new THREE.Group();
-        const bodyGeo = new THREE.BoxGeometry(6, 6, 6);
+        
+        // Foundation & Walls
+        const bodyGeo = new THREE.BoxGeometry(7, 5, 7);
         const houseBody = new THREE.Mesh(bodyGeo, houseMat);
-        houseBody.position.y = 3;
+        houseBody.position.y = 2.5;
         houseBody.castShadow = true;
         houseBody.receiveShadow = true;
+        houseGroup.add(houseBody);
 
-        const roofGeo = new THREE.ConeGeometry(5.5, 3.5, 4);
+        // Roof
+        const roofGeo = new THREE.ConeGeometry(6, 3, 4);
         const roof = new THREE.Mesh(roofGeo, roofMat);
-        roof.position.y = 7.75;
+        roof.position.y = 6.5;
         roof.rotation.y = Math.PI / 4;
         roof.castShadow = true;
-
-        houseGroup.add(houseBody);
         houseGroup.add(roof);
+
+        // Glass Windows
+        const windowGeo = new THREE.PlaneGeometry(1.5, 1.8);
+        const windowMesh = new THREE.Mesh(windowGeo, glassMat);
+        windowMesh.position.set(0, 2.8, 3.51);
+        houseGroup.add(windowMesh);
+
         houseGroup.position.set(hX, hY, hZ);
         group.add(houseGroup);
       }
 
-      // Spawn Food (Apples)
+      // Organic Trees
+      const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.9 });
+      const foliageMat = new THREE.MeshStandardMaterial({ color: 0x2e5a1c, roughness: 0.6 });
+
+      for (let i = 0; i < 4; i++) {
+        const tX = offsetX + Math.abs(pseudoRandom(offsetX + i * 5, offsetZ)) * CHUNK_SIZE;
+        const tZ = offsetZ + Math.abs(pseudoRandom(offsetX, offsetZ + i * 5)) * CHUNK_SIZE;
+        const tY = getTerrainHeight(tX, tZ);
+
+        const treeGroup = new THREE.Group();
+        const trunkGeo = new THREE.CylinderGeometry(0.3, 0.45, 4, 8);
+        const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+        trunk.position.y = 2;
+        trunk.castShadow = true;
+        treeGroup.add(trunk);
+
+        const foliageGeo = new THREE.DodecahedronGeometry(2.5, 1);
+        const foliage = new THREE.Mesh(foliageGeo, foliageMat);
+        foliage.position.y = 4.8;
+        foliage.castShadow = true;
+        treeGroup.add(foliage);
+
+        treeGroup.position.set(tX, tY, tZ);
+        group.add(treeGroup);
+      }
+
+      // Collectible Apples
       for (let i = 0; i < 3; i++) {
         const aX = offsetX + Math.abs(pseudoRandom(offsetX + i, offsetZ)) * CHUNK_SIZE;
         const aZ = offsetZ + Math.abs(pseudoRandom(offsetX, offsetZ + i)) * CHUNK_SIZE;
-        const aY = getTerrainHeight(aX, aZ) + 0.3;
+        const aY = getTerrainHeight(aX, aZ) + 0.35;
 
-        const appleGeo = new THREE.SphereGeometry(0.2, 12, 12);
-        const appleMat = new THREE.MeshStandardMaterial({ color: 0xff0033, roughness: 0.2, emissive: 0x440011 });
+        const appleGeo = new THREE.SphereGeometry(0.22, 16, 16);
+        const appleMat = new THREE.MeshStandardMaterial({ color: 0xdd1122, roughness: 0.2, metalness: 0.1 });
         const apple = new THREE.Mesh(appleGeo, appleMat);
         apple.position.set(aX, aY, aZ);
         apple.castShadow = true;
@@ -331,14 +417,14 @@
         foodApples.push({ mesh: apple, group: group });
       }
 
-      // Spawn Collectible Crystals
+      // Collectible Crystals
       if (Math.abs(pseudoRandom(offsetZ, offsetX)) > 0.4) {
         const cX = offsetX + Math.abs(pseudoRandom(offsetX * 2, offsetZ)) * CHUNK_SIZE;
         const cZ = offsetZ + Math.abs(pseudoRandom(offsetX, offsetZ * 2)) * CHUNK_SIZE;
         const cY = getTerrainHeight(cX, cZ) + 0.8;
 
-        const crystalGeo = new THREE.OctahedronGeometry(0.4, 0);
-        const crystalMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.8, roughness: 0.1 });
+        const crystalGeo = new THREE.OctahedronGeometry(0.45, 0);
+        const crystalMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00aaaa, emissiveIntensity: 0.6, roughness: 0.1 });
         const crystal = new THREE.Mesh(crystalGeo, crystalMat);
         crystal.position.set(cX, cY, cZ);
 
@@ -443,23 +529,24 @@
     function createSword() {
       const swordGroup = new THREE.Group();
 
-      // Glowing Blade
-      const bladeGeo = new THREE.BoxGeometry(0.04, 0.75, 0.015);
-      const bladeMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.6, metalness: 0.9, roughness: 0.1 });
+      // Glowing High-Quality Steel Blade
+      const bladeGeo = new THREE.BoxGeometry(0.04, 0.8, 0.015);
+      const bladeMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00aaaa, emissiveIntensity: 0.5, metalness: 0.95, roughness: 0.1 });
       const blade = new THREE.Mesh(bladeGeo, bladeMat);
-      blade.position.y = 0.42;
+      blade.position.y = 0.45;
       blade.castShadow = true;
       swordGroup.add(blade);
 
-      // Guard & Hilt
-      const guardGeo = new THREE.BoxGeometry(0.18, 0.02, 0.04);
-      const hiltMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9 });
+      // Guard & Leather Handle
+      const guardGeo = new THREE.BoxGeometry(0.2, 0.025, 0.04);
+      const hiltMat = new THREE.MeshStandardMaterial({ color: 0x1f1f1f, metalness: 0.8, roughness: 0.3 });
       const guard = new THREE.Mesh(guardGeo, hiltMat);
       guard.position.y = 0.05;
       swordGroup.add(guard);
 
-      const handleGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.14, 16);
-      const handle = new THREE.Mesh(handleGeo, hiltMat);
+      const handleGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.15, 16);
+      const handleMat = new THREE.MeshStandardMaterial({ color: 0x3a2211, roughness: 0.8 });
+      const handle = new THREE.Mesh(handleGeo, handleMat);
       handle.position.y = -0.03;
       swordGroup.add(handle);
 
@@ -574,6 +661,8 @@
             .addScaledVector(rightDir, xAxis * currentSpeed);
 
           const nextPos = cameraGroup.position.clone().add(moveVec);
+          
+          // Precise local terrain ground alignment
           const terrainY = getTerrainHeight(nextPos.x, nextPos.z);
           nextPos.y = terrainY + 1.6;
           cameraGroup.position.copy(nextPos);
@@ -593,7 +682,6 @@
     function updateDayNightCycle(deltaTime) {
       dayNightTimer += deltaTime;
 
-      // Deplete Hunger over time
       hunger = Math.max(0, hunger - deltaTime * 0.7);
       if (hunger <= 0) {
         health = Math.max(0, health - deltaTime * 2.5);
@@ -607,7 +695,7 @@
           skySphereMesh.material.map = nightSkyTexture;
           skySphereMesh.material.needsUpdate = true;
           scene.fog.color.setHex(0x050515);
-          scene.fog.density = 0.015;
+          scene.fog.density = 0.012;
           ambientLight.color.setHex(0x222244);
           ambientLight.intensity = 0.2;
           sunLight.intensity = 0.1;
@@ -619,10 +707,10 @@
           skySphereMesh.material.map = daySkyTexture;
           skySphereMesh.material.needsUpdate = true;
           scene.fog.color.setHex(0xaaccff);
-          scene.fog.density = 0.007;
-          ambientLight.color.setHex(0xffffff);
-          ambientLight.intensity = 0.8;
-          sunLight.intensity = 1.2;
+          scene.fog.density = 0.005;
+          ambientLight.color.setHex(0xddeeff);
+          ambientLight.intensity = 0.6;
+          sunLight.intensity = 1.5;
           flashlight.visible = false;
 
           clearEyeMonsters();
@@ -786,17 +874,17 @@
 
       if (skySphereMesh) {
         skySphereMesh.position.copy(cameraGroup.position);
-        skySphereMesh.rotation.y += 0.0002;
+        skySphereMesh.rotation.y += 0.00015;
       }
 
-      // Animate Crystals Rotation
+      // Animate Crystals Rotation & Floating
       dreamCrystals.forEach(c => {
-        c.mesh.rotation.y += 0.03;
-        c.mesh.position.y += Math.sin(now * 0.003) * 0.002;
+        c.mesh.rotation.y += 0.025;
+        c.mesh.position.y += Math.sin(now * 0.003) * 0.0015;
       });
 
-      // Animate Apples Rotation
-      foodApples.forEach(a => a.mesh.rotation.y += 0.02);
+      // Animate Apples Subtle Motion
+      foodApples.forEach(a => a.mesh.rotation.y += 0.015);
 
       renderer.render(scene, camera);
     }
