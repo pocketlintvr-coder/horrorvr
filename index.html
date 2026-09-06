@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gorilla Tag Horror Experience</title>
+  <title>Gorilla Tag VR Experience</title>
   <style>
     body {
       margin: 0;
@@ -36,25 +36,22 @@
 </head>
 <body>
 
-  <button id="vr-button">ENTER VR HORROR</button>
+  <button id="vr-button">ENTER VR EXPERIENCE</button>
 
   <script>
     let scene, camera, renderer, cameraGroup;
     let flashlight, ambientLight, flickeringLight;
     let monster;
 
-    // Controllers & Motion Data
-    let controller1, controller2;
+    // Controllers & Motion
     let grip1, grip2;
-    
     const handPrevPos = [new THREE.Vector3(), new THREE.Vector3()];
     const handCurrPos = [new THREE.Vector3(), new THREE.Vector3()];
 
-    // LOCOMOTION TUNING
-    const playerVelocity = new THREE.Vector3(0, 0, 0);
-    const forwardMultiplier = 6.0; // Boosted propulsion force
-    const upwardMultiplier = 0.2;  // Capped upward pop
-    const friction = 0.82;         // Quick ground friction
+    // Physics Tuning
+    const velocity = new THREE.Vector3(0, 0, 0);
+    const PUSH_FORCE = 5.5;
+    const FRICTION = 0.82;
 
     init();
 
@@ -63,6 +60,7 @@
       scene.background = new THREE.Color(0x050508);
       scene.fog = new THREE.FogExp2(0x050508, 0.08);
 
+      // Main VR Rig Frame
       cameraGroup = new THREE.Group();
       scene.add(cameraGroup);
 
@@ -77,6 +75,7 @@
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
+      // Lighting
       ambientLight = new THREE.AmbientLight(0x1a1a24, 0.8);
       scene.add(ambientLight);
 
@@ -89,14 +88,15 @@
       flashlight.castShadow = true;
       flashlight.shadow.mapSize.width = 1024;
       flashlight.shadow.mapSize.height = 1024;
+      
       const lightTarget = new THREE.Object3D();
       lightTarget.position.set(0, 0, -5);
       camera.add(lightTarget);
       flashlight.target = lightTarget;
       camera.add(flashlight);
 
-      createHighQualityEnvironment();
-      createHighQualityMonster();
+      createEnvironment();
+      createMonster();
       setupControllers();
 
       document.getElementById('vr-button').addEventListener('click', onEnterVR);
@@ -131,7 +131,7 @@
       return new THREE.CanvasTexture(canvas);
     }
 
-    function createHighQualityEnvironment() {
+    function createEnvironment() {
       const brickTexture = generateCanvasTexture('brick');
       brickTexture.wrapS = THREE.RepeatWrapping;
       brickTexture.wrapT = THREE.RepeatWrapping;
@@ -142,6 +142,7 @@
       woodTexture.wrapT = THREE.RepeatWrapping;
       woodTexture.repeat.set(4, 20);
 
+      // Floor
       const floorGeo = new THREE.PlaneGeometry(12, 80);
       const floorMat = new THREE.MeshStandardMaterial({ map: woodTexture, roughness: 0.4 });
       const floor = new THREE.Mesh(floorGeo, floorMat);
@@ -149,11 +150,13 @@
       floor.receiveShadow = true;
       scene.add(floor);
 
+      // Ceiling
       const ceiling = floor.clone();
       ceiling.position.y = 4.5;
       ceiling.rotation.x = Math.PI / 2;
       scene.add(ceiling);
 
+      // Walls
       const wallMat = new THREE.MeshStandardMaterial({ map: brickTexture, roughness: 0.8 });
 
       const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(80, 4.5), wallMat);
@@ -169,7 +172,7 @@
       scene.add(rightWall);
     }
 
-    function createHighQualityMonster() {
+    function createMonster() {
       const monsterGroup = new THREE.Group();
 
       const bodyGeo = new THREE.CylinderGeometry(0.35, 0.15, 3.2, 12);
@@ -202,15 +205,10 @@
     }
 
     function setupControllers() {
-      controller1 = renderer.xr.getController(0);
-      controller2 = renderer.xr.getController(1);
-      cameraGroup.add(controller1);
-      cameraGroup.add(controller2);
-
       grip1 = renderer.xr.getControllerGrip(0);
       grip2 = renderer.xr.getControllerGrip(1);
 
-      const handGeo = new THREE.SphereGeometry(0.18, 16, 16);
+      const handGeo = new THREE.SphereGeometry(0.16, 16, 16);
       const handMat = new THREE.MeshStandardMaterial({ color: 0xcc1111, roughness: 0.3, emissive: 0x220000 });
 
       grip1.add(new THREE.Mesh(handGeo, handMat));
@@ -220,12 +218,13 @@
       cameraGroup.add(grip2);
     }
 
-    function processGtagImpulsePhysics() {
+    function processLocomotion() {
       const session = renderer.xr.getSession();
       if (!session) return;
 
       scene.updateMatrixWorld(true);
 
+      // Facing orientation from headset
       const forwardDir = new THREE.Vector3();
       camera.getWorldDirection(forwardDir);
       forwardDir.y = 0;
@@ -235,45 +234,38 @@
 
       const grips = [grip1, grip2];
 
-      // Dynamic floor threshold based on headset height (0.4m below headset = natural low hand reach)
-      const relativeFloorY = camera.position.y - 0.4;
-
       for (let i = 0; i < 2; i++) {
         const grip = grips[i];
         if (!grip) continue;
 
-        // Track hand position in cameraGroup local space to ignore world drift
-        handCurrPos[i].copy(grip.position);
+        // Measure hand position in world space
+        grip.getWorldPosition(handCurrPos[i]);
 
         const handDelta = new THREE.Vector3().subVectors(handPrevPos[i], handCurrPos[i]);
 
-        // CHECK IF HAND IS EXTENDED DOWN (ANYWHERE BELOW SHOULDER LEVEL)
-        if (handCurrPos[i].y <= relativeFloorY) {
-          
+        // ABSOLUTE GROUND COLLISION (Triggers when hands enter lower 25cm near floor plane)
+        if (handCurrPos[i].y <= 0.25) {
           const deltaForward = handDelta.dot(forwardDir);
           const deltaRight = handDelta.dot(rightDir);
 
           if (handDelta.length() > 0.001) {
-            playerVelocity.x += (forwardDir.x * deltaForward + rightDir.x * deltaRight) * forwardMultiplier;
-            playerVelocity.z += (forwardDir.z * deltaForward + rightDir.z * deltaRight) * forwardMultiplier;
-
-            if (handDelta.y > 0) {
-              playerVelocity.y += handDelta.y * upwardMultiplier;
-            }
+            velocity.x += (forwardDir.x * deltaForward + rightDir.x * deltaRight) * PUSH_FORCE;
+            velocity.z += (forwardDir.z * deltaForward + rightDir.z * deltaRight) * PUSH_FORCE;
           }
         }
 
         handPrevPos[i].copy(handCurrPos[i]);
       }
 
-      // APPLY MOVEMENT TO CAMERA GROUP
-      cameraGroup.position.add(playerVelocity);
+      // Apply ground velocity to rig position
+      cameraGroup.position.x += velocity.x;
+      cameraGroup.position.z += velocity.z;
 
-      playerVelocity.x *= friction;
-      playerVelocity.z *= friction;
-      playerVelocity.y *= friction;
+      // Ground friction decay
+      velocity.x *= FRICTION;
+      velocity.z *= FRICTION;
 
-      // KEEP PLAYER INSIDE ROOM
+      // Lock boundaries
       cameraGroup.position.x = Math.max(-5.2, Math.min(5.2, cameraGroup.position.x));
       cameraGroup.position.z = Math.max(-35, Math.min(8, cameraGroup.position.z));
     }
@@ -306,7 +298,7 @@
     }
 
     function render(timestamp) {
-      processGtagImpulsePhysics();
+      processLocomotion();
 
       if (flickeringLight) {
         flickeringLight.intensity = 2.0 + Math.sin(timestamp * 0.01) * 0.5 + (Math.random() < 0.08 ? -1.5 : 0);
