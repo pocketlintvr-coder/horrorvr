@@ -58,13 +58,16 @@
     let wallColliders = [];
     let audioCtx = null;
 
-    // Controllers
+    // Controllers & Motion Tracking
     let controller1, controller2;
     let grip1, grip2;
+    let prevController1Pos = new THREE.Vector3();
+    let prevController2Pos = new THREE.Vector3();
+    let armSwingSpeedBoost = 0;
 
     // Movement & Difficulty Tuning
-    const MOVE_SPEED = 0.07;
-    const MONSTER_SPEED = 0.045; // Significantly faster monster speed
+    const BASE_MOVE_SPEED = 0.06;
+    const MONSTER_SPEED = 0.045;
     const JUMPSCARE_DISTANCE = 1.2;
     const SNAP_ANGLE = Math.PI / 4;
     let canSnapTurn = true;
@@ -138,7 +141,8 @@
 
     function resetMonsterPosition() {
       if (monster) {
-        monster.position.set(9 * CELL_SIZE, 1.6, 9 * CELL_SIZE);
+        monster.scale.set(2.2, 2.8, 1);
+        monster.position.set(9 * CELL_SIZE, 1.4, 9 * CELL_SIZE);
       }
     }
 
@@ -176,15 +180,19 @@
       const overlay = document.getElementById('jumpscare-overlay');
       overlay.style.display = 'block';
 
-      // Snap monster right into the player's face
+      // Downscale monster so it fits nicely on screen during the jumpscare
+      monster.scale.set(1.2, 1.5, 1);
+
+      // Position monster directly ahead in full view
       const viewDir = new THREE.Vector3();
       camera.getWorldDirection(viewDir);
-      monster.position.copy(cameraGroup.position).addScaledVector(viewDir, 0.6);
+      monster.position.copy(cameraGroup.position).addScaledVector(viewDir, 1.2);
+      monster.position.y += 0.2;
 
       let shakeFrames = 0;
       const shakeInterval = setInterval(() => {
-        cameraGroup.position.x += (Math.random() - 0.5) * 0.3;
-        cameraGroup.position.y += (Math.random() - 0.5) * 0.3;
+        cameraGroup.position.x += (Math.random() - 0.5) * 0.15;
+        cameraGroup.position.y += (Math.random() - 0.5) * 0.15;
         shakeFrames++;
 
         if (shakeFrames > 20) {
@@ -248,10 +256,7 @@
       const monsterTexture = textureLoader.load('https://i.postimg.cc/66Mq17NV/IMG-3836-pixel.png');
 
       const mat = new THREE.SpriteMaterial({ map: monsterTexture, transparent: true });
-      const sprite = new THREE.Sprite(mat);
-      sprite.scale.set(3.0, 3.8, 1);
-
-      monster = sprite;
+      monster = new THREE.Sprite(mat);
       resetMonsterPosition();
       scene.add(monster);
     }
@@ -275,8 +280,34 @@
       cameraGroup.add(grip2);
     }
 
+    function updateArmSwingMotion() {
+      if (!controller1 || !controller2) return;
+
+      const currPos1 = new THREE.Vector3();
+      const currPos2 = new THREE.Vector3();
+      controller1.getWorldPosition(currPos1);
+      controller2.getWorldPosition(currPos2);
+
+      const dist1 = currPos1.distanceTo(prevController1Pos);
+      const dist2 = currPos2.distanceTo(prevController2Pos);
+
+      const currentSwingVelocity = dist1 + dist2;
+
+      // Smoothly accumulate arm swing movement into extra velocity boost
+      if (currentSwingVelocity > 0.02) {
+        armSwingSpeedBoost = Math.min(0.08, armSwingSpeedBoost + currentSwingVelocity * 0.8);
+      } else {
+        armSwingSpeedBoost *= 0.85; // Decay when arms stop moving
+      }
+
+      prevController1Pos.copy(currPos1);
+      prevController2Pos.copy(currPos2);
+    }
+
     function processThumbstickLocomotion() {
       if (isJumpscaring) return;
+
+      updateArmSwingMotion();
 
       const session = renderer.xr.getSession();
       if (!session) return;
@@ -293,8 +324,10 @@
           continue;
         }
 
-        // Movement
+        // Movement with active speed boost based on arm swinging
         if (source.handedness === 'left') {
+          const currentSpeed = BASE_MOVE_SPEED + armSwingSpeedBoost;
+
           const forwardDir = new THREE.Vector3();
           camera.getWorldDirection(forwardDir);
           forwardDir.y = 0;
@@ -303,8 +336,8 @@
           const rightDir = new THREE.Vector3().crossVectors(camera.up, forwardDir).negate();
 
           const moveVec = new THREE.Vector3()
-            .addScaledVector(forwardDir, -yAxis * MOVE_SPEED)
-            .addScaledVector(rightDir, xAxis * MOVE_SPEED);
+            .addScaledVector(forwardDir, -yAxis * currentSpeed)
+            .addScaledVector(rightDir, xAxis * currentSpeed);
 
           const nextPos = cameraGroup.position.clone().add(moveVec);
 
