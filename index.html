@@ -32,27 +32,43 @@
       box-shadow: 0 0 25px rgba(255, 255, 0, 0.8);
       color: #000;
     }
+    #jumpscare-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background-color: rgba(255, 0, 0, 0.85);
+      display: none;
+      z-index: 1000;
+      pointer-events: none;
+    }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
   <button id="vr-button">ENTER VR EXPERIENCE</button>
+  <div id="jumpscare-overlay"></div>
 
   <script>
     let scene, camera, renderer, cameraGroup;
     let flashlight, ambientLight, flickeringLight;
     let monster;
     let wallColliders = [];
+    let audioCtx = null;
 
     // Controllers
     let controller1, controller2;
     let grip1, grip2;
 
-    // Movement Tuning
-    const MOVE_SPEED = 0.06;
+    // Movement & Difficulty Tuning
+    const MOVE_SPEED = 0.07;
+    const MONSTER_SPEED = 0.045; // Significantly faster monster speed
+    const JUMPSCARE_DISTANCE = 1.2;
     const SNAP_ANGLE = Math.PI / 4;
     let canSnapTurn = true;
+    let isJumpscaring = false;
 
     // 0 = Empty, 1 = Wall
     const mazeGrid = [
@@ -75,11 +91,10 @@
     function init() {
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x0a0a05);
-      scene.fog = new THREE.FogExp2(0x0a0a05, 0.05);
+      scene.fog = new THREE.FogExp2(0x0a0a05, 0.08);
 
       cameraGroup = new THREE.Group();
-      // Spawn player in cell (1,1)
-      cameraGroup.position.set(1 * CELL_SIZE, 0, 1 * CELL_SIZE);
+      resetPlayerPosition();
       scene.add(cameraGroup);
 
       camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
@@ -93,14 +108,14 @@
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
-      ambientLight = new THREE.AmbientLight(0xd4ce98, 0.6);
+      ambientLight = new THREE.AmbientLight(0xd4ce98, 0.35);
       scene.add(ambientLight);
 
       flickeringLight = new THREE.PointLight(0xffea88, 2.0, 20);
       flickeringLight.position.set(5 * CELL_SIZE, 3.2, 5 * CELL_SIZE);
       scene.add(flickeringLight);
 
-      flashlight = new THREE.SpotLight(0xfffbe6, 4, 20, Math.PI / 5, 0.4, 1);
+      flashlight = new THREE.SpotLight(0xfffbe6, 5, 22, Math.PI / 5, 0.4, 1);
       const lightTarget = new THREE.Object3D();
       lightTarget.position.set(0, 0, -5);
       camera.add(lightTarget);
@@ -114,6 +129,72 @@
       document.getElementById('vr-button').addEventListener('click', onEnterVR);
       window.addEventListener('resize', onWindowResize);
       renderer.setAnimationLoop(render);
+    }
+
+    function resetPlayerPosition() {
+      cameraGroup.position.set(1 * CELL_SIZE, 0, 1 * CELL_SIZE);
+      cameraGroup.rotation.set(0, 0, 0);
+    }
+
+    function resetMonsterPosition() {
+      if (monster) {
+        monster.position.set(9 * CELL_SIZE, 1.6, 9 * CELL_SIZE);
+      }
+    }
+
+    function playJumpscareSound() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(120, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.8);
+
+      gain.gain.setValueAtTime(1.0, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.8);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.8);
+    }
+
+    function triggerJumpscare() {
+      if (isJumpscaring) return;
+      isJumpscaring = true;
+
+      playJumpscareSound();
+
+      const overlay = document.getElementById('jumpscare-overlay');
+      overlay.style.display = 'block';
+
+      // Snap monster right into the player's face
+      const viewDir = new THREE.Vector3();
+      camera.getWorldDirection(viewDir);
+      monster.position.copy(cameraGroup.position).addScaledVector(viewDir, 0.6);
+
+      let shakeFrames = 0;
+      const shakeInterval = setInterval(() => {
+        cameraGroup.position.x += (Math.random() - 0.5) * 0.3;
+        cameraGroup.position.y += (Math.random() - 0.5) * 0.3;
+        shakeFrames++;
+
+        if (shakeFrames > 20) {
+          clearInterval(shakeInterval);
+          overlay.style.display = 'none';
+          resetPlayerPosition();
+          resetMonsterPosition();
+          isJumpscaring = false;
+        }
+      }, 30);
     }
 
     function buildMaze() {
@@ -168,12 +249,11 @@
 
       const mat = new THREE.SpriteMaterial({ map: monsterTexture, transparent: true });
       const sprite = new THREE.Sprite(mat);
-      sprite.scale.set(2.5, 3.2, 1);
+      sprite.scale.set(3.0, 3.8, 1);
 
-      // Position monster in maze far end cell (9, 9)
-      sprite.position.set(9 * CELL_SIZE, 1.6, 9 * CELL_SIZE);
-      scene.add(sprite);
       monster = sprite;
+      resetMonsterPosition();
+      scene.add(monster);
     }
 
     function setupControllers() {
@@ -196,6 +276,8 @@
     }
 
     function processThumbstickLocomotion() {
+      if (isJumpscaring) return;
+
       const session = renderer.xr.getSession();
       if (!session) return;
 
@@ -226,7 +308,7 @@
 
           const nextPos = cameraGroup.position.clone().add(moveVec);
 
-          // Simple wall collision check
+          // Wall collision check
           let collide = false;
           const playerRadius = 0.4;
           const playerBox = new THREE.Box3(
@@ -287,15 +369,19 @@
       processThumbstickLocomotion();
 
       if (flickeringLight) {
-        flickeringLight.intensity = 1.5 + Math.sin(timestamp * 0.008) * 0.5 + (Math.random() < 0.05 ? -1.0 : 0);
+        flickeringLight.intensity = 1.0 + Math.sin(timestamp * 0.015) * 0.8 + (Math.random() < 0.08 ? -1.2 : 0);
       }
 
-      if (monster) {
+      if (monster && !isJumpscaring) {
         const dir = new THREE.Vector3().subVectors(cameraGroup.position, monster.position);
         dir.y = 0;
-        if (dir.length() > 0.5) {
+        const distance = dir.length();
+
+        if (distance <= JUMPSCARE_DISTANCE) {
+          triggerJumpscare();
+        } else {
           dir.normalize();
-          monster.position.addScaledVector(dir, 0.012);
+          monster.position.addScaledVector(dir, MONSTER_SPEED);
         }
       }
 
