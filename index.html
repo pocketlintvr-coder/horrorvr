@@ -38,7 +38,6 @@
     let scene, camera, renderer, flashlight, ambientLight;
     let monster, cameraGroup;
     
-    // Controller / Hand Tracking Data
     let controller1, controller2;
     let grip1, grip2;
     
@@ -50,12 +49,16 @@
     let playerVelocityY = 0;
     const gravity = -0.005;
 
+    // Movement Safety Caps
+    const MAX_SWING_SPEED = 0.35; // Prevents being flung into the abyss
+    const MAX_JUMP_FORCE = 0.15;
+
     init();
 
     function init() {
       scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x111118); // Brighter background fog
-      scene.fog = new THREE.FogExp2(0x111118, 0.05);  // Much clearer fog distance
+      scene.background = new THREE.Color(0x111118);
+      scene.fog = new THREE.FogExp2(0x111118, 0.05);
 
       cameraGroup = new THREE.Group();
       scene.add(cameraGroup);
@@ -68,8 +71,7 @@
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
-      // --- BRIGHTER LIGHTING SETUP ---
-      ambientLight = new THREE.AmbientLight(0x404050, 1.2); // Increased room brightness
+      ambientLight = new THREE.AmbientLight(0x404050, 1.5);
       scene.add(ambientLight);
 
       const ceilingLight = new THREE.PointLight(0xffffff, 1.5, 30);
@@ -101,7 +103,6 @@
       grip1 = renderer.xr.getControllerGrip(0);
       grip2 = renderer.xr.getControllerGrip(1);
 
-      // Highly visible red hands
       const handGeo = new THREE.SphereGeometry(0.18, 16, 16);
       const handMat = new THREE.MeshStandardMaterial({ color: 0xff0000, roughness: 0.2, emissive: 0x330000 });
 
@@ -118,7 +119,7 @@
 
       scene.updateMatrixWorld(true);
 
-      // --- 1. THUMBSTICK LOCOMOTION (Backup stick walk) ---
+      // Thumbstick backup movement
       for (const source of session.inputSources) {
         if (source.gamepad && source.gamepad.axes) {
           const axes = source.gamepad.axes;
@@ -140,7 +141,7 @@
         }
       }
 
-      // --- 2. GORILLA TAG ARM PHYSICS ---
+      // Gorilla Tag Arm Movement
       const hands = [
         { grip: grip1, curr: currHandPos1, prev: prevHandPos1 },
         { grip: grip2, curr: currHandPos2, prev: prevHandPos2 }
@@ -153,28 +154,32 @@
 
         h.grip.getWorldPosition(h.curr);
 
+        // Compute Delta
         const delta = new THREE.Vector3().subVectors(h.prev, h.curr);
 
-        // Ground collision height line relative to player rig base
+        // Clamp speed spikes to prevent flinging
+        delta.x = Math.max(-MAX_SWING_SPEED, Math.min(MAX_SWING_SPEED, delta.x));
+        delta.z = Math.max(-MAX_SWING_SPEED, Math.min(MAX_SWING_SPEED, delta.z));
+        delta.y = Math.max(-MAX_SWING_SPEED, Math.min(MAX_SWING_SPEED, delta.y));
+
         const groundHeight = cameraGroup.position.y + 0.8;
 
         if (h.curr.y <= groundHeight) {
           touchingGround = true;
 
-          // Drag motion pushes rig in inverse vector direction
-          cameraGroup.position.x += delta.x * 2.8;
-          cameraGroup.position.z += delta.z * 2.8;
+          // Push player back away from hand direction
+          cameraGroup.position.x += delta.x * 1.5;
+          cameraGroup.position.z += delta.z * 1.5;
 
-          // Vertical launch impulse on slap down
           if (delta.y > 0) {
-            playerVelocityY = delta.y * 1.8;
+            playerVelocityY = Math.min(delta.y * 1.2, MAX_JUMP_FORCE);
           }
         }
 
         h.prev.copy(h.curr);
       });
 
-      // --- 3. GRAVITY ---
+      // Gravity Processing
       if (!touchingGround && cameraGroup.position.y > 0) {
         playerVelocityY += gravity;
         cameraGroup.position.y += playerVelocityY;
@@ -186,10 +191,13 @@
       } else if (touchingGround) {
         if (playerVelocityY < 0) playerVelocityY = 0;
       }
+
+      // MAP BOUNDARY SAFETY CHECKS
+      cameraGroup.position.x = Math.max(-13, Math.min(13, cameraGroup.position.x)); // Side wall bounds
+      cameraGroup.position.z = Math.max(-45, Math.min(10, cameraGroup.position.z)); // Hallway end bounds
     }
 
     function createEnvironment() {
-      // Textured floor
       const floorGeo = new THREE.PlaneGeometry(30, 100);
       const floorMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.6 });
       const floor = new THREE.Mesh(floorGeo, floorMat);
