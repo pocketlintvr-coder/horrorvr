@@ -121,7 +121,7 @@
     function SmoothNoise(x, z) {
       const corners = (MathNoise(x-1, z-1) + MathNoise(x+1, z-1) + MathNoise(x-1, z+1) + MathNoise(x+1, z+1)) / 16;
       const sides = (MathNoise(x-1, z) + MathNoise(x+1, z) + MathNoise(x, z-1) + MathNoise(x, z+1)) / 8;
-      const center = MathNoise(x) / 4;
+      const center = MathNoise(x, z) / 4;
       return corners + sides + center;
     }
 
@@ -218,21 +218,6 @@
       renderer.setAnimationLoop(render);
     }
 
-    function triggerHaptic(sourceIndex, intensity = 0.5, duration = 100) {
-      const session = renderer.xr.getSession();
-      if (!session) return;
-      
-      let count = 0;
-      for (const inputSource of session.inputSources) {
-        if (inputSource.gamepad && inputSource.gamepad.hapticActuators && inputSource.gamepad.hapticActuators.length > 0) {
-          if (sourceIndex === 'all' || count === sourceIndex || inputSource.handedness === sourceIndex) {
-            inputSource.gamepad.hapticActuators[0].pulse(intensity, duration);
-          }
-        }
-        count++;
-      }
-    }
-
     function resetPlayerPosition() {
       health = 100;
       hunger = 100;
@@ -247,6 +232,7 @@
 
       updateChunks(true);
 
+      // Unstuck resolution logic
       let offsetAngle = 0;
       let offsetRadius = 1.0;
       while (checkCollision(cameraGroup.position.x, cameraGroup.position.z)) {
@@ -647,9 +633,8 @@
       for (let i = 0; i < count; i++) {
         const eye = new THREE.Sprite(mat);
         const playerPos = cameraGroup.position;
-        // Distribute monsters in a complete ring spread widely around the player
-        const angle = (i / count) * Math.PI * 2 + (Math.random() * 0.4 - 0.2);
-        const dist = 40 + Math.random() * 30;
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 30 + Math.random() * 25;
 
         const ex = playerPos.x + Math.cos(angle) * dist;
         const ez = playerPos.z + Math.sin(angle) * dist;
@@ -763,7 +748,6 @@
           if (canSnapTurn && Math.abs(xAxis) > 0.6) {
             cameraGroup.rotation.y -= Math.sign(xAxis) * SNAP_ANGLE;
             canSnapTurn = false;
-            triggerHaptic('right', 0.2, 30);
           }
         }
       }
@@ -833,7 +817,6 @@
         if (distToSword < 2.2 && swordVelocity > 0.035) {
           eye.userData.hp -= 1;
           playSound(260, 'sawtooth', 0.15);
-          triggerHaptic('right', 0.8, 120);
 
           const pushDir = new THREE.Vector3().subVectors(eye.position, currSwordWorldPos).normalize();
           eye.position.addScaledVector(pushDir, 3.5);
@@ -851,7 +834,6 @@
             if (distToPlayer <= 1.2) {
               health = Math.max(0, health - 0.5);
               triggerDamageFlash();
-              triggerHaptic('all', 0.9, 150);
             } else {
               const nextMonsterPos = eye.position.clone().addScaledVector(dirToPlayer, eye.userData.speed);
               if (!checkCollision(nextMonsterPos.x, nextMonsterPos.z)) {
@@ -872,7 +854,6 @@
           hunger = Math.min(100, hunger + 30);
           health = Math.min(100, health + 15);
           playSound(520, 'sine', 0.15);
-          triggerHaptic('all', 0.3, 80);
           item.group.remove(item.mesh);
           foodApples.splice(i, 1);
         }
@@ -886,7 +867,6 @@
         if (playerPos.distanceTo(crystalWorldPos) < 2.0) {
           crystalsCollected++;
           playSound(880, 'triangle', 0.25);
-          triggerHaptic('all', 0.5, 100);
           item.group.remove(item.mesh);
           dreamCrystals.splice(i, 1);
         }
@@ -902,7 +882,6 @@
     function triggerDeath() {
       isGameOver = true;
       playSound(90, 'sawtooth', 0.8);
-      triggerHaptic('all', 1.0, 500);
       alert(`You perished in the Dreamcore Hills on Day ${daysSurvived}!\nCrystals Collected: ${crystalsCollected}`);
       clearEyeMonsters();
       resetPlayerPosition();
