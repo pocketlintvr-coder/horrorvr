@@ -43,14 +43,16 @@
     let flashlight, ambientLight, flickeringLight;
     let monster;
 
-    // Controllers & Motion
+    // Controllers & Motion Data
+    let controller1, controller2;
     let grip1, grip2;
+
     const handPrevPos = [new THREE.Vector3(), new THREE.Vector3()];
     const handCurrPos = [new THREE.Vector3(), new THREE.Vector3()];
 
     // Physics Tuning
     const velocity = new THREE.Vector3(0, 0, 0);
-    const PUSH_FORCE = 5.5;
+    const PUSH_FORCE = 6.0;
     const FRICTION = 0.82;
 
     init();
@@ -60,7 +62,6 @@
       scene.background = new THREE.Color(0x050508);
       scene.fog = new THREE.FogExp2(0x050508, 0.08);
 
-      // Main VR Rig Frame
       cameraGroup = new THREE.Group();
       scene.add(cameraGroup);
 
@@ -75,7 +76,6 @@
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
-      // Lighting
       ambientLight = new THREE.AmbientLight(0x1a1a24, 0.8);
       scene.add(ambientLight);
 
@@ -88,7 +88,7 @@
       flashlight.castShadow = true;
       flashlight.shadow.mapSize.width = 1024;
       flashlight.shadow.mapSize.height = 1024;
-      
+
       const lightTarget = new THREE.Object3D();
       lightTarget.position.set(0, 0, -5);
       camera.add(lightTarget);
@@ -142,7 +142,6 @@
       woodTexture.wrapT = THREE.RepeatWrapping;
       woodTexture.repeat.set(4, 20);
 
-      // Floor
       const floorGeo = new THREE.PlaneGeometry(12, 80);
       const floorMat = new THREE.MeshStandardMaterial({ map: woodTexture, roughness: 0.4 });
       const floor = new THREE.Mesh(floorGeo, floorMat);
@@ -150,13 +149,11 @@
       floor.receiveShadow = true;
       scene.add(floor);
 
-      // Ceiling
       const ceiling = floor.clone();
       ceiling.position.y = 4.5;
       ceiling.rotation.x = Math.PI / 2;
       scene.add(ceiling);
 
-      // Walls
       const wallMat = new THREE.MeshStandardMaterial({ map: brickTexture, roughness: 0.8 });
 
       const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(80, 4.5), wallMat);
@@ -205,6 +202,9 @@
     }
 
     function setupControllers() {
+      controller1 = renderer.xr.getController(0);
+      controller2 = renderer.xr.getController(1);
+
       grip1 = renderer.xr.getControllerGrip(0);
       grip2 = renderer.xr.getControllerGrip(1);
 
@@ -214,6 +214,8 @@
       grip1.add(new THREE.Mesh(handGeo, handMat));
       grip2.add(new THREE.Mesh(handGeo, handMat));
 
+      cameraGroup.add(controller1);
+      cameraGroup.add(controller2);
       cameraGroup.add(grip1);
       cameraGroup.add(grip2);
     }
@@ -224,7 +226,6 @@
 
       scene.updateMatrixWorld(true);
 
-      // Facing orientation from headset
       const forwardDir = new THREE.Vector3();
       camera.getWorldDirection(forwardDir);
       forwardDir.y = 0;
@@ -233,39 +234,44 @@
       const rightDir = new THREE.Vector3().crossVectors(camera.up, forwardDir).negate();
 
       const grips = [grip1, grip2];
+      const controllers = [controller1, controller2];
 
       for (let i = 0; i < 2; i++) {
         const grip = grips[i];
+        const controller = controllers[i];
         if (!grip) continue;
 
-        // Measure hand position in world space
         grip.getWorldPosition(handCurrPos[i]);
 
         const handDelta = new THREE.Vector3().subVectors(handPrevPos[i], handCurrPos[i]);
 
-        // ABSOLUTE GROUND COLLISION (Triggers when hands enter lower 25cm near floor plane)
-        if (handCurrPos[i].y <= 0.25) {
+        // Trigger input or downward arm motion directly drives speed
+        let isTriggerPressed = false;
+        if (controller && controller.hasAttribute && controller.userData) {
+          const inputSource = controller.userData.inputSource;
+          if (inputSource && inputSource.gamepad && inputSource.gamepad.buttons[0]) {
+            isTriggerPressed = inputSource.gamepad.buttons[0].pressed;
+          }
+        }
+
+        // Apply impulse when holding trigger OR swinging arm backward/downward
+        if (isTriggerPressed || handDelta.length() > 0.002) {
           const deltaForward = handDelta.dot(forwardDir);
           const deltaRight = handDelta.dot(rightDir);
 
-          if (handDelta.length() > 0.001) {
-            velocity.x += (forwardDir.x * deltaForward + rightDir.x * deltaRight) * PUSH_FORCE;
-            velocity.z += (forwardDir.z * deltaForward + rightDir.z * deltaRight) * PUSH_FORCE;
-          }
+          velocity.x += (forwardDir.x * deltaForward + rightDir.x * deltaRight) * PUSH_FORCE;
+          velocity.z += (forwardDir.z * deltaForward + rightDir.z * deltaRight) * PUSH_FORCE;
         }
 
         handPrevPos[i].copy(handCurrPos[i]);
       }
 
-      // Apply ground velocity to rig position
       cameraGroup.position.x += velocity.x;
       cameraGroup.position.z += velocity.z;
 
-      // Ground friction decay
       velocity.x *= FRICTION;
       velocity.z *= FRICTION;
 
-      // Lock boundaries
       cameraGroup.position.x = Math.max(-5.2, Math.min(5.2, cameraGroup.position.x));
       cameraGroup.position.z = Math.max(-35, Math.min(8, cameraGroup.position.z));
     }
