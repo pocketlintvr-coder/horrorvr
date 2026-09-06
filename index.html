@@ -123,7 +123,7 @@
 
     function SmoothNoise(x, z) {
       const corners = (MathNoise(x-1, z-1) + MathNoise(x+1, z-1) + MathNoise(x-1, z+1) + MathNoise(x+1, z+1)) / 16;
-      const sides = (MathNoise(x-1, z) + MathNoise(x+1, z) + MathNoise(x-1, z) + MathNoise(x, z+1)) / 8;
+      const sides = (MathNoise(x-1, z) + MathNoise(x+1, z-1) + MathNoise(x-1, z) + MathNoise(x, z+1)) / 8;
       const center = MathNoise(x, z) / 4;
       return corners + sides + center;
     }
@@ -796,7 +796,10 @@
         dayNightTimer = 0;
         isNight = !isNight;
 
+        const bgAudio = document.getElementById('bg-music');
+
         if (isNight) {
+          if (bgAudio) bgAudio.pause();
           skySphereMesh.material.map = nightSkyTexture;
           skySphereMesh.material.needsUpdate = true;
           scene.fog.color.setHex(0x050515);
@@ -809,6 +812,7 @@
           spawnEyeMonsters(5 + Math.min(10, daysSurvived * 2));
           triggerHaptic('both', 0.8, 300);
         } else {
+          if (bgAudio) bgAudio.play().catch(e => console.log("Audio play blocked:", e));
           daysSurvived++;
           skySphereMesh.material.map = daySkyTexture;
           skySphereMesh.material.needsUpdate = true;
@@ -970,7 +974,7 @@
     function onEnterVR() {
       // Ensure audio playback starts on user interaction if restricted by browser policies
       const bgAudio = document.getElementById('bg-music');
-      if (bgAudio) {
+      if (bgAudio && !isNight) {
         bgAudio.play().catch(e => console.log("Audio play blocked:", e));
       }
 
