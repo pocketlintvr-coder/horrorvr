@@ -62,6 +62,9 @@
 </head>
 <body>
 
+  <!-- Background Audio Loop -->
+  <audio id="bg-music" src="https://www.image2url.com/r2/default/audio/1788736134916-726630de-e91a-4478-a281-4413564358c7.mp3" loop autoplay></audio>
+
   <button id="vr-button">ENTER REALISTIC VR SURVIVAL</button>
   <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | CRYSTALS: 0 | DAY 1</div>
   <div id="damage-overlay"></div>
@@ -120,7 +123,7 @@
 
     function SmoothNoise(x, z) {
       const corners = (MathNoise(x-1, z-1) + MathNoise(x+1, z-1) + MathNoise(x-1, z+1) + MathNoise(x+1, z+1)) / 16;
-      const sides = (MathNoise(x-1, z) + MathNoise(x+1, z) + MathNoise(x, z-1) + MathNoise(x, z+1)) / 8;
+      const sides = (MathNoise(x-1, z) + MathNoise(x+1, z) + MathNoise(x-1, z) + MathNoise(x, z+1)) / 8;
       const center = MathNoise(x, z) / 4;
       return corners + sides + center;
     }
@@ -965,6 +968,12 @@
     }
 
     function onEnterVR() {
+      // Ensure audio playback starts on user interaction if restricted by browser policies
+      const bgAudio = document.getElementById('bg-music');
+      if (bgAudio) {
+        bgAudio.play().catch(e => console.log("Audio play blocked:", e));
+      }
+
       if (!('xr' in navigator)) {
         alert("WebXR API not available. Make sure you are using an HTTPS URL inside your VR headset browser.");
         return;
