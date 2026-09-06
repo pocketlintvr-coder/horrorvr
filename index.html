@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gorilla Tag VR Experience</title>
+  <title>VR Horror Experience</title>
   <style>
     body {
       margin: 0;
@@ -44,14 +44,13 @@
     let monster;
 
     // Controllers
+    let controller1, controller2;
     let grip1, grip2;
-    const handPrevPos = [new THREE.Vector3(), new THREE.Vector3()];
-    const handCurrPos = [new THREE.Vector3(), new THREE.Vector3()];
 
-    // Locomotion Settings
-    const playerVelocity = new THREE.Vector3(0, 0, 0);
-    const SWIPE_SENSITIVITY = 4.0;
-    const FRICTION = 0.85;
+    // Movement Tuning
+    const MOVE_SPEED = 0.08;
+    const SNAP_ANGLE = Math.PI / 4; // 45 degrees
+    let canSnapTurn = true;
 
     init();
 
@@ -200,63 +199,65 @@
     }
 
     function setupControllers() {
+      controller1 = renderer.xr.getController(0);
+      controller2 = renderer.xr.getController(1);
+
       grip1 = renderer.xr.getControllerGrip(0);
       grip2 = renderer.xr.getControllerGrip(1);
 
-      const handGeo = new THREE.SphereGeometry(0.15, 16, 16);
-      const handMat = new THREE.MeshStandardMaterial({ color: 0xcc1111, roughness: 0.3, emissive: 0x220000 });
+      const handGeo = new THREE.SphereGeometry(0.1, 16, 16);
+      const handMat = new THREE.MeshStandardMaterial({ color: 0xcc1111, roughness: 0.3 });
 
       grip1.add(new THREE.Mesh(handGeo, handMat));
       grip2.add(new THREE.Mesh(handGeo, handMat));
 
+      cameraGroup.add(controller1);
+      cameraGroup.add(controller2);
       cameraGroup.add(grip1);
       cameraGroup.add(grip2);
     }
 
-    function processLocomotion() {
+    function processThumbstickLocomotion() {
       const session = renderer.xr.getSession();
       if (!session) return;
 
-      scene.updateMatrixWorld(true);
+      for (const source of session.inputSources) {
+        if (!source.gamepad) continue;
 
-      // Get view direction
-      const forwardDir = new THREE.Vector3();
-      camera.getWorldDirection(forwardDir);
-      forwardDir.y = 0;
-      forwardDir.normalize();
+        const axes = source.gamepad.axes;
+        
+        // Axes indices standard mapping: [0: touch-X, 1: touch-Y, 2: thumbstick-X, 3: thumbstick-Y]
+        const xAxis = axes[2] !== undefined ? axes[2] : axes[0];
+        const yAxis = axes[3] !== undefined ? axes[3] : axes[1];
 
-      const rightDir = new THREE.Vector3().crossVectors(camera.up, forwardDir).negate();
-
-      const grips = [grip1, grip2];
-
-      for (let i = 0; i < 2; i++) {
-        const grip = grips[i];
-        if (!grip) continue;
-
-        grip.getWorldPosition(handCurrPos[i]);
-
-        // Direct displacement delta
-        const handDelta = new THREE.Vector3().subVectors(handPrevPos[i], handCurrPos[i]);
-
-        // Push player backward/forward based on physical arm movement direction
-        if (handDelta.length() > 0.003) {
-          const deltaForward = handDelta.dot(forwardDir);
-          const deltaRight = handDelta.dot(rightDir);
-
-          playerVelocity.x += (forwardDir.x * deltaForward + rightDir.x * deltaRight) * SWIPE_SENSITIVITY;
-          playerVelocity.z += (forwardDir.z * deltaForward + rightDir.z * deltaRight) * SWIPE_SENSITIVITY;
+        if (Math.abs(xAxis) < 0.1 && Math.abs(yAxis) < 0.1) {
+          if (source.handedness === 'right') canSnapTurn = true;
+          continue;
         }
 
-        handPrevPos[i].copy(handCurrPos[i]);
+        // Left Hand: Movement (Forward/Backward & Strafe)
+        if (source.handedness === 'left') {
+          const forwardDir = new THREE.Vector3();
+          camera.getWorldDirection(forwardDir);
+          forwardDir.y = 0;
+          forwardDir.normalize();
+
+          const rightDir = new THREE.Vector3().crossVectors(camera.up, forwardDir).negate();
+
+          cameraGroup.position.addScaledVector(forwardDir, -yAxis * MOVE_SPEED);
+          cameraGroup.position.addScaledVector(rightDir, xAxis * MOVE_SPEED);
+        }
+
+        // Right Hand: Snap Turning
+        if (source.handedness === 'right') {
+          if (canSnapTurn && Math.abs(xAxis) > 0.6) {
+            cameraGroup.rotation.y -= Math.sign(xAxis) * SNAP_ANGLE;
+            canSnapTurn = false;
+          }
+        }
       }
 
-      // Apply velocity vector directly to player rig
-      cameraGroup.position.x += playerVelocity.x;
-      cameraGroup.position.z += playerVelocity.z;
-
-      playerVelocity.x *= FRICTION;
-      playerVelocity.z *= FRICTION;
-
+      // Map Bounds Collision
       cameraGroup.position.x = Math.max(-5.2, Math.min(5.2, cameraGroup.position.x));
       cameraGroup.position.z = Math.max(-35, Math.min(8, cameraGroup.position.z));
     }
@@ -289,7 +290,7 @@
     }
 
     function render(timestamp) {
-      processLocomotion();
+      processThumbstickLocomotion();
 
       if (flickeringLight) {
         flickeringLight.intensity = 2.0 + Math.sin(timestamp * 0.01) * 0.5 + (Math.random() < 0.08 ? -1.5 : 0);
