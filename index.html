@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gorilla Tag Impulse Physics</title>
+  <title>Gorilla Tag Horror Experience</title>
   <style>
     body {
       margin: 0;
@@ -50,11 +50,12 @@
     const handPrevPos = [new THREE.Vector3(), new THREE.Vector3()];
     const handCurrPos = [new THREE.Vector3(), new THREE.Vector3()];
 
-    // REAL PHYSICS VELOCITY SYSTEM
+    // TUNED PHYSICS VARIABLES
     const playerVelocity = new THREE.Vector3(0, 0, 0);
-    const gravity = -0.008;
-    const bounceElasticity = 1.6; // High bounce impulse force multiplier
-    const friction = 0.96; // Ground/Air drag
+    const gravity = -0.007;
+    const bounceElasticity = 0.7; // Reduced for grounded, realistic leaps
+    const maxJumpSpeed = 0.05;    // Prevents rocket launches into ceiling
+    const friction = 0.92;        // Controlled ground slide
 
     init();
 
@@ -220,7 +221,6 @@
       cameraGroup.add(grip2);
     }
 
-    // IMPULSE COLLISION PHYSICS
     function processGtagImpulsePhysics() {
       const session = renderer.xr.getSession();
       if (!session) return;
@@ -235,37 +235,36 @@
 
         grip.getWorldPosition(handCurrPos[i]);
 
-        // Hand movement vector inside controller space
         const handDelta = new THREE.Vector3().subVectors(handPrevPos[i], handCurrPos[i]);
 
-        // GROUND BOUNCE CHECK
-        const floorY = cameraGroup.position.y + 0.15; // Ground collision offset
+        // ADJUSTED FLOOR HITBOX REACH LEVEL
+        const floorY = cameraGroup.position.y + 0.85; 
+
         if (handCurrPos[i].y <= floorY) {
-          
-          // Slap impulse bounce force (equal and opposite reaction to hand impact speed)
           if (handDelta.y > 0.002 || Math.abs(handDelta.x) > 0.002 || Math.abs(handDelta.z) > 0.002) {
+            
+            // Scaled horizontal push
             playerVelocity.x += handDelta.x * bounceElasticity;
-            playerVelocity.y += Math.max(handDelta.y * bounceElasticity, 0.05); // Upward launch leap
             playerVelocity.z += handDelta.z * bounceElasticity;
+            
+            // Capped vertical leap force
+            const verticalForce = Math.min(handDelta.y * bounceElasticity, maxJumpSpeed);
+            playerVelocity.y += Math.max(verticalForce, 0.01);
           }
         }
 
-        // WALL BOUNCE CHECKS (Left Wall: X=-5.8, Right Wall: X=5.8)
+        // WALL BOUNCE CHECKS
         if (handCurrPos[i].x <= -5.5 && handDelta.x < 0) {
-          playerVelocity.x += -handDelta.x * bounceElasticity * 1.5; // Bounce off left wall
-          playerVelocity.y += Math.max(handDelta.y * bounceElasticity, 0.02);
+          playerVelocity.x += -handDelta.x * bounceElasticity;
         } else if (handCurrPos[i].x >= 5.5 && handDelta.x > 0) {
-          playerVelocity.x += -handDelta.x * bounceElasticity * 1.5; // Bounce off right wall
-          playerVelocity.y += Math.max(handDelta.y * bounceElasticity, 0.02);
+          playerVelocity.x += -handDelta.x * bounceElasticity;
         }
 
         handPrevPos[i].copy(handCurrPos[i]);
       }
 
-      // APPLY CONTINUOUS INERTIA PHYSICS TO PLAYER RIG
       cameraGroup.position.add(playerVelocity);
 
-      // Apply Gravity
       if (cameraGroup.position.y > 0) {
         playerVelocity.y += gravity;
       } else {
@@ -273,11 +272,9 @@
         playerVelocity.y = 0;
       }
 
-      // Air/Ground Drag Friction
       playerVelocity.x *= friction;
       playerVelocity.z *= friction;
 
-      // Keep inside map bounds
       cameraGroup.position.x = Math.max(-5.2, Math.min(5.2, cameraGroup.position.x));
       cameraGroup.position.z = Math.max(-35, Math.min(8, cameraGroup.position.z));
     }
