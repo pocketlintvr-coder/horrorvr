@@ -118,6 +118,11 @@
     let audioCtx = null;
     let cookieTexture = null;
 
+    // Web Audio API Elements for Sound Distortion
+    let audioSourceNodeBg = null;
+    let audioSourceNodeScream = null;
+    let biquadFilter = null;
+
     // Motion & VR Controls
     let controller1, controller2;
     let grip1, grip2;
@@ -138,7 +143,7 @@
     function SmoothNoise(x, z) {
       const corners = (MathNoise(x-1, z-1) + MathNoise(x+1, z-1) + MathNoise(x-1, z+1) + MathNoise(x+1, z+1)) / 16;
       const sides = (MathNoise(x-1, z) + MathNoise(x+1, z-1) + MathNoise(x-1, z) + MathNoise(x, z+1)) / 8;
-      const center = MathNoise(x, z) / 4;
+      const center = MathNoise(x) / 4;
       return corners + sides + center;
     }
 
@@ -169,6 +174,27 @@
       total += Math.sin(x * 0.03) * Math.cos(z * 0.03) * 4.0;
 
       return total;
+    }
+
+    function setupAudioDistortion() {
+      if (audioCtx) return;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+      const bgAudio = document.getElementById('bg-music');
+      const screamAudio = document.getElementById('monster-scream');
+
+      if (bgAudio && screamAudio) {
+        audioSourceNodeBg = audioCtx.createMediaElementSource(bgAudio);
+        audioSourceNodeScream = audioCtx.createMediaElementSource(screamAudio);
+
+        biquadFilter = audioCtx.createBiquadFilter();
+        biquadFilter.type = 'lowpass';
+        biquadFilter.frequency.value = 20000;
+
+        audioSourceNodeBg.connect(biquadFilter);
+        audioSourceNodeScream.connect(biquadFilter);
+        biquadFilter.connect(audioCtx.destination);
+      }
     }
 
     function playMonsterChaseSound() {
@@ -508,7 +534,6 @@
         roof.castShadow = true;
         houseGroup.add(roof);
 
-        // Rare Firearm Loot Spawn inside the House (~25% chance per house)
         if (Math.abs(pseudoRandom(hX * 2, hZ * 2)) > 0.75) {
           const gunLoot = createGunModel();
           gunLoot.position.set(hX, hY + 0.6, hZ);
@@ -1015,6 +1040,48 @@
       }
     }
 
+    function updateTrippyEffects(timestamp) {
+      if (sanity < 50) {
+        const insanityFactor = (50 - sanity) / 50; 
+        const time = timestamp * 0.003;
+
+        // Visual Trippy Color Cycles
+        const r = (Math.sin(time) * 0.5 + 0.5) * insanityFactor;
+        const g = (Math.sin(time + 2) * 0.5 + 0.5) * insanityFactor;
+        const b = (Math.sin(time + 4) * 0.5 + 0.5) * insanityFactor;
+
+        if (isNight) {
+          ambientLight.color.setRGB(0.1 + r * 0.5, 0.1 + g * 0.2, 0.3 + b * 0.6);
+          scene.fog.color.setRGB(0.02 + r * 0.2, 0.02 + g * 0.1, 0.08 + b * 0.3);
+        } else {
+          ambientLight.color.setRGB(0.6 + r * 0.4, 0.6 + g * 0.4, 0.6 + b * 0.4);
+          scene.fog.color.setRGB(0.6 + r * 0.3, 0.7 + g * 0.2, 0.9 + b * 0.1);
+        }
+
+        camera.rotation.z = Math.sin(time * 2) * 0.08 * insanityFactor;
+
+        // Audio Distortion Effects
+        if (biquadFilter && audioCtx) {
+          const targetCutoff = 20000 - (insanityFactor * 19200); 
+          biquadFilter.frequency.setTargetAtTime(targetCutoff, audioCtx.currentTime, 0.1);
+        }
+
+        const bgAudio = document.getElementById('bg-music');
+        if (bgAudio) {
+          bgAudio.playbackRate = 1.0 - (insanityFactor * 0.3) + Math.sin(time * 3) * 0.05 * insanityFactor;
+        }
+      } else {
+        camera.rotation.z = 0;
+        if (biquadFilter && audioCtx) {
+          biquadFilter.frequency.setTargetAtTime(20000, audioCtx.currentTime, 0.1);
+        }
+        const bgAudio = document.getElementById('bg-music');
+        if (bgAudio) {
+          bgAudio.playbackRate = 1.0;
+        }
+      }
+    }
+
     function updateDayNightCycle(deltaTime) {
       dayNightTimer += deltaTime;
 
@@ -1265,7 +1332,7 @@
 
     function playSound(freq, type, duration) {
       if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        setupAudioDistortion();
       }
       if (audioCtx.state === 'suspended') audioCtx.resume();
 
@@ -1289,6 +1356,7 @@
     }
 
     function onEnterVR() {
+      setupAudioDistortion();
       const bgAudio = document.getElementById('bg-music');
       if (bgAudio && !isNight) {
         bgAudio.play().catch(e => console.log("Audio play blocked:", e));
@@ -1328,6 +1396,7 @@
 
       processThumbstickLocomotion();
       updateDayNightCycle(deltaTime);
+      updateTrippyEffects(timestamp);
       updateCombatAndInteractions();
 
       if (skySphereMesh) {
