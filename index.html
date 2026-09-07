@@ -88,6 +88,7 @@
     let isNight = false;
     let dayNightTimer = 0;
     let isGameOver = false;
+    let houseStayTimer = 0; // Tracks house duration
 
     // Upgrades System
     let damageMultiplier = 1;
@@ -302,7 +303,6 @@
 
       document.body.appendChild(renderer.domElement);
 
-      // Sanity Overlay Shader Mesh for WebXR VR tracking
       sanityMaterial = new THREE.ShaderMaterial({
         uniforms: {
           uSanity: { value: 1.0 },
@@ -390,16 +390,13 @@
       damageMultiplier = 1;
       speedUpgradeLevel = 0;
       speedBoostTimer = 0;
+      houseStayTimer = 0;
       isGameOver = false;
       hasGun = false;
       ammoCount = 0;
 
-      if (gunMesh) {
-        gunMesh.visible = false;
-      }
-      if (swordMesh) {
-        swordMesh.visible = true;
-      }
+      if (gunMesh) gunMesh.visible = false;
+      if (swordMesh) swordMesh.visible = true;
       
       stopMonsterChaseSound();
       stopSeamlessNightLoop();
@@ -900,8 +897,6 @@
           }
         }
       }
-      
-      // Cookie monster is invincible - bullets do not kill or hurt it
     }
 
     function spawnEyeMonsters(count) {
@@ -958,7 +953,6 @@
       cookie.position.set(cx, cy, cz);
       cookie.scale.set(8.0, 8.0, 1);
 
-      // Invincible Cookie Monster configuration
       cookie.userData = {
         speed: 0.18,
         damage: 1.2,
@@ -1126,11 +1120,18 @@
       const playerPos = cameraGroup.position.clone();
       const playerSafe = isInsideSafeZone(playerPos.x, playerPos.z);
       
-      if (isNight) {
-        sanity = Math.max(0, sanity - deltaTime * 1.5);
-      } else {
-        if (playerSafe) {
+      // Sanity drop mechanic for house camping (> 10s)
+      if (playerSafe) {
+        houseStayTimer += deltaTime;
+        if (houseStayTimer >= 10.0) {
+          sanity = Math.max(0, sanity - deltaTime * 4.5);
+        } else {
           sanity = Math.min(100, sanity + deltaTime * 2.0);
+        }
+      } else {
+        houseStayTimer = 0;
+        if (isNight) {
+          sanity = Math.max(0, sanity - deltaTime * 1.5);
         } else {
           sanity = Math.max(0, sanity - deltaTime * 0.3);
         }
@@ -1279,7 +1280,6 @@
         }
       }
 
-      // Invincible Cookie Monster Logic
       for (let i = cookieMonsters.length - 1; i >= 0; i--) {
         const cookie = cookieMonsters[i];
         const dirToPlayer = new THREE.Vector3().subVectors(playerPos, cookie.position);
@@ -1419,7 +1419,6 @@
       updateDayNightCycle(deltaTime);
       updateCombatAndInteractions();
 
-      // Lock WebXR low-sanity visual overlay mesh in front of active VR view
       const xrCamera = renderer.xr.getCamera(camera);
       const targetCam = renderer.xr.isPresenting ? xrCamera : camera;
       
