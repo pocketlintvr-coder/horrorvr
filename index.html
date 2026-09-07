@@ -134,7 +134,7 @@
     function SmoothNoise(x, z) {
       const corners = (MathNoise(x-1, z-1) + MathNoise(x+1, z-1) + MathNoise(x-1, z+1) + MathNoise(x+1, z+1)) / 16;
       const sides = (MathNoise(x-1, z) + MathNoise(x+1, z-1) + MathNoise(x-1, z) + MathNoise(x, z+1)) / 8;
-      const center = MathNoise(x) / 4;
+      const center = MathNoise(x, z) / 4;
       return corners + sides + center;
     }
 
