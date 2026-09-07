@@ -549,7 +549,6 @@
         roof.castShadow = true;
         houseGroup.add(roof);
 
-        // Rare Firearm Loot Spawn inside the House (~25% chance per house)
         if (Math.abs(pseudoRandom(hX * 2, hZ * 2)) > 0.75) {
           const gunLoot = createGunModel();
           gunLoot.position.set(hX, hY + 0.6, hZ);
@@ -741,7 +740,6 @@
       watchCtx.textAlign = 'center';
       watchCtx.fillText(`DAY ${daysSurvived} SURVIVAL`, 128, 28);
 
-      // HP Bar
       watchCtx.fillStyle = '#440000';
       watchCtx.fillRect(20, 38, 216, 26);
       watchCtx.fillStyle = '#ff2222';
@@ -753,7 +751,6 @@
       watchCtx.font = 'bold 13px sans-serif';
       watchCtx.fillText(`HP: ${Math.round(health)}`, 128, 55);
 
-      // Hunger Bar
       watchCtx.fillStyle = '#443300';
       watchCtx.fillRect(20, 70, 216, 26);
       watchCtx.fillStyle = '#ffaa00';
@@ -762,7 +759,6 @@
       watchCtx.fillStyle = '#ffffff';
       watchCtx.fillText(`HUNGER: ${Math.round(hunger)}`, 128, 87);
 
-      // Sanity Bar
       watchCtx.fillStyle = '#110033';
       watchCtx.fillRect(20, 102, 216, 26);
       watchCtx.fillStyle = '#aa00ff';
@@ -1114,9 +1110,8 @@
         }
       }
 
-      // Smoothly shift colors across all objects in the world based on sanity level
-      let sanityFactor = Math.max(0, Math.min(1, sanity / 100)); // 1 = Normal colors, 0 = Full distort/red
-      let targetHSL = { h: 0, s: 1.0, l: 0.5 }; // Red/Corrupted hue target at 0 sanity
+      let sanityFactor = Math.max(0, Math.min(1, sanity / 100));
+      let targetHSL = { h: 0, s: 1.0, l: 0.5 };
 
       for (let i = 0; i < allMaterials.length; i++) {
         let mat = allMaterials[i];
@@ -1197,7 +1192,6 @@
       const playerPos = cameraGroup.position.clone();
       const playerSafe = isInsideSafeZone(playerPos.x, playerPos.z);
 
-      // Pickup Ground Guns
       for (let i = groundGuns.length - 1; i >= 0; i--) {
         const gunItem = groundGuns[i];
         if (playerPos.distanceTo(new THREE.Vector3(gunItem.x, playerPos.y, gunItem.z)) < 2.0) {
@@ -1214,7 +1208,6 @@
         }
       }
 
-      // Eye Monsters Combat
       for (let i = eyeMonsters.length - 1; i >= 0; i--) {
         const eye = eyeMonsters[i];
         const distToSword = currSwordWorldPos.distanceTo(eye.position);
@@ -1274,7 +1267,6 @@
         }
       }
 
-      // Cookie Monster Combat & Behavior
       for (let i = cookieMonsters.length - 1; i >= 0; i--) {
         const cookie = cookieMonsters[i];
         const distToSword = currSwordWorldPos.distanceTo(cookie.position);
