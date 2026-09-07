@@ -43,28 +43,6 @@
       z-index: 1000;
       pointer-events: none;
     }
-    #trippy-overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      display: none;
-      z-index: 997;
-      pointer-events: none;
-      mix-blend-mode: color-dodge;
-      animation: trippyBg 2s infinite alternate ease-in-out;
-    }
-    @keyframes trippyBg {
-      0% {
-        background: radial-gradient(circle, rgba(255,0,255,0.2) 0%, rgba(0,255,255,0.2) 50%, rgba(255,255,0,0.2) 100%);
-        filter: hue-rotate(0deg) contrast(150%);
-      }
-      100% {
-        background: radial-gradient(circle, rgba(0,255,255,0.3) 0%, rgba(255,0,255,0.3) 50%, rgba(0,255,0,0.3) 100%);
-        filter: hue-rotate(360deg) contrast(200%);
-      }
-    }
     #objective-ui {
       position: absolute;
       top: 20px;
@@ -91,12 +69,14 @@
   <button id="vr-button">ENTER REALISTIC VR SURVIVAL</button>
   <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | SANITY: 100 | CRYSTALS: 0 | AMMO: 0 | DAY 1</div>
   <div id="damage-overlay"></div>
-  <div id="trippy-overlay"></div>
 
   <script>
     let scene, camera, renderer, cameraGroup;
     let ambientLight, sunLight, flashlight;
     let skySphereMesh, daySkyTexture, nightSkyTexture, customGrassTexture;
+
+    // Materials tracking for low sanity hue changes
+    let allMaterials = [];
 
     // Game Stats
     let health = 100;
@@ -161,7 +141,7 @@
     function SmoothNoise(x, z) {
       const corners = (MathNoise(x-1, z-1) + MathNoise(x+1, z-1) + MathNoise(x-1, z+1) + MathNoise(x+1, z+1)) / 16;
       const sides = (MathNoise(x-1, z) + MathNoise(x+1, z-1) + MathNoise(x-1, z) + MathNoise(x, z+1)) / 8;
-      const center = MathNoise(x, z) / 4;
+      const center = MathNoise(x) / 4;
       return corners + sides + center;
     }
 
@@ -219,9 +199,37 @@
       }
     }
 
+    function registerMaterial(mat) {
+      if (!mat) return;
+      if (Array.isArray(mat)) {
+        mat.forEach(m => registerMaterial(m));
+        return;
+      }
+      if (!allMaterials.includes(mat)) {
+        if (!mat.userData) mat.userData = {};
+        if (!mat.userData.baseColor) {
+          mat.userData.baseColor = mat.color ? mat.color.clone() : new THREE.Color(0xffffff);
+        }
+        allMaterials.push(mat);
+      }
+    }
+
+    function unregisterMaterial(mat) {
+      if (!mat) return;
+      if (Array.isArray(mat)) {
+        mat.forEach(m => unregisterMaterial(m));
+        return;
+      }
+      const idx = allMaterials.indexOf(mat);
+      if (idx !== -1) {
+        allMaterials.splice(idx, 1);
+      }
+    }
+
     function spawnCrystalsAt(position, count = 5) {
       const crystalGeo = new THREE.OctahedronGeometry(0.45, 0);
       const crystalMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00aaaa, emissiveIntensity: 0.6, roughness: 0.1 });
+      registerMaterial(crystalMat);
 
       for (let i = 0; i < count; i++) {
         const crystal = new THREE.Mesh(crystalGeo, crystalMat);
@@ -369,6 +377,8 @@
 
       const skyGeo = new THREE.SphereGeometry(750, 60, 40);
       const skyMat = new THREE.MeshBasicMaterial({ map: daySkyTexture, side: THREE.BackSide });
+      registerMaterial(skyMat);
+
       skySphereMesh = new THREE.Mesh(skyGeo, skyMat);
       scene.add(skySphereMesh);
     }
@@ -436,6 +446,7 @@
         roughness: 0.7, 
         metalness: 0.05
       });
+      registerMaterial(grassMat);
 
       const terrain = new THREE.Mesh(geo, grassMat);
       terrain.position.set(worldOffsetX + CHUNK_SIZE / 2, 0, worldOffsetZ + CHUNK_SIZE / 2);
@@ -452,6 +463,9 @@
       const group = new THREE.Group();
       const metalMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9, roughness: 0.2 });
       const woodMat = new THREE.MeshStandardMaterial({ color: 0x4a2a11, roughness: 0.7 });
+
+      registerMaterial(metalMat);
+      registerMaterial(woodMat);
 
       const barrelGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.6, 16);
       const barrel = new THREE.Mesh(barrelGeo, metalMat);
@@ -480,6 +494,10 @@
       const houseMat = new THREE.MeshStandardMaterial({ color: 0xfbf8ee, roughness: 0.3, metalness: 0.1, side: THREE.DoubleSide });
       const roofMat = new THREE.MeshStandardMaterial({ color: 0x4a3b32, roughness: 0.5 });
       const floorMat = new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.7 });
+
+      registerMaterial(houseMat);
+      registerMaterial(roofMat);
+      registerMaterial(floorMat);
 
       if (Math.abs(pseudoRandom(offsetX, offsetZ)) > 0.65) {
         const hX = offsetX + 20 + Math.abs(pseudoRandom(offsetX, 0)) * (CHUNK_SIZE - 40);
@@ -556,6 +574,9 @@
       const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.9 });
       const foliageMat = new THREE.MeshStandardMaterial({ color: 0x2e5a1c, roughness: 0.6 });
 
+      registerMaterial(trunkMat);
+      registerMaterial(foliageMat);
+
       for (let i = 0; i < 4; i++) {
         const tX = offsetX + Math.abs(pseudoRandom(offsetX + i * 5, offsetZ)) * CHUNK_SIZE;
         const tZ = offsetZ + Math.abs(pseudoRandom(offsetX, offsetZ + i * 5)) * CHUNK_SIZE;
@@ -587,6 +608,8 @@
 
         const appleGeo = new THREE.SphereGeometry(0.22, 16, 16);
         const appleMat = new THREE.MeshStandardMaterial({ color: 0xdd1122, roughness: 0.2, metalness: 0.1 });
+        registerMaterial(appleMat);
+
         const apple = new THREE.Mesh(appleGeo, appleMat);
         apple.position.set(aX, aY, aZ);
         apple.castShadow = true;
@@ -602,6 +625,8 @@
 
         const crystalGeo = new THREE.OctahedronGeometry(0.45, 0);
         const crystalMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00aaaa, emissiveIntensity: 0.6, roughness: 0.1 });
+        registerMaterial(crystalMat);
+
         const crystal = new THREE.Mesh(crystalGeo, crystalMat);
         crystal.position.set(cX, cY, cZ);
 
@@ -616,6 +641,7 @@
 
       group.traverse(child => {
         if (child.isMesh) {
+          unregisterMaterial(child.material);
           child.geometry.dispose();
           if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
           else child.material.dispose();
@@ -665,12 +691,16 @@
 
       const strapGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.12, 16);
       const strapMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
+      registerMaterial(strapMat);
+
       const strap = new THREE.Mesh(strapGeo, strapMat);
       strap.rotation.z = Math.PI / 2;
       watchGroup.add(strap);
 
       const bodyGeo = new THREE.BoxGeometry(0.1, 0.02, 0.1);
       const bodyMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.8, roughness: 0.2 });
+      registerMaterial(bodyMat);
+
       const body = new THREE.Mesh(bodyGeo, bodyMat);
       body.position.y = 0.045;
       watchGroup.add(body);
@@ -683,6 +713,8 @@
       watchTexture = new THREE.CanvasTexture(watchCanvas);
       const screenGeo = new THREE.PlaneGeometry(0.09, 0.09);
       const screenMat = new THREE.MeshBasicMaterial({ map: watchTexture });
+      registerMaterial(screenMat);
+
       const screenMesh = new THREE.Mesh(screenGeo, screenMat);
       screenMesh.position.set(0, 0.056, 0);
       screenMesh.rotation.x = -Math.PI / 2;
@@ -760,6 +792,8 @@
 
       const bladeGeo = new THREE.BoxGeometry(0.04, 0.8, 0.015);
       const bladeMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00aaaa, emissiveIntensity: 0.5, metalness: 0.95, roughness: 0.1 });
+      registerMaterial(bladeMat);
+
       const blade = new THREE.Mesh(bladeGeo, bladeMat);
       blade.position.y = 0.45;
       blade.castShadow = true;
@@ -767,12 +801,16 @@
 
       const guardGeo = new THREE.BoxGeometry(0.2, 0.025, 0.04);
       const hiltMat = new THREE.MeshStandardMaterial({ color: 0x1f1f1f, metalness: 0.8, roughness: 0.3 });
+      registerMaterial(hiltMat);
+
       const guard = new THREE.Mesh(guardGeo, hiltMat);
       guard.position.y = 0.05;
       swordGroup.add(guard);
 
       const handleGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.15, 16);
       const handleMat = new THREE.MeshStandardMaterial({ color: 0x3a2211, roughness: 0.8 });
+      registerMaterial(handleMat);
+
       const handle = new THREE.Mesh(handleGeo, handleMat);
       handle.position.y = -0.03;
       swordGroup.add(handle);
@@ -814,6 +852,7 @@
           eye.userData.hp -= 10;
           if (eye.userData.hp <= 0) {
             spawnCrystalsAt(eye.position, 5);
+            unregisterMaterial(eye.material);
             scene.remove(eye);
             eyeMonsters.splice(i, 1);
             checkActiveChasers();
@@ -825,6 +864,7 @@
         const cookie = cookieMonsters[i];
         if (cookie.position.distanceTo(gunWorldPos) < 35.0) {
           spawnCrystalsAt(cookie.position, 5);
+          unregisterMaterial(cookie.material);
           scene.remove(cookie);
           cookieMonsters.splice(i, 1);
           checkActiveChasers();
@@ -835,9 +875,11 @@
     function spawnEyeMonsters(count) {
       const textureLoader = new THREE.TextureLoader();
       const eyeTexture = textureLoader.load('https://i.postimg.cc/T3JHxXYf/creepy-eye-png-by-solarmaker2005-dhue8bn-fullview-(1).png');
-      const mat = new THREE.SpriteMaterial({ map: eyeTexture, transparent: true });
 
       for (let i = 0; i < count; i++) {
+        const mat = new THREE.SpriteMaterial({ map: eyeTexture, transparent: true });
+        registerMaterial(mat);
+
         const eye = new THREE.Sprite(mat);
         const playerPos = cameraGroup.position;
         
@@ -873,6 +915,8 @@
     function spawnCookieMonster() {
       if (!cookieTexture || cookieMonsters.length > 0) return;
       const mat = new THREE.SpriteMaterial({ map: cookieTexture, transparent: true });
+      registerMaterial(mat);
+
       const cookie = new THREE.Sprite(mat);
       const playerPos = cameraGroup.position;
 
@@ -899,13 +943,19 @@
     }
 
     function clearEyeMonsters() {
-      eyeMonsters.forEach(eye => scene.remove(eye));
+      eyeMonsters.forEach(eye => {
+        unregisterMaterial(eye.material);
+        scene.remove(eye);
+      });
       eyeMonsters = [];
       checkActiveChasers();
     }
 
     function clearCookieMonsters() {
-      cookieMonsters.forEach(c => scene.remove(c));
+      cookieMonsters.forEach(c => {
+        unregisterMaterial(c.material);
+        scene.remove(c);
+      });
       cookieMonsters = [];
       checkActiveChasers();
     }
@@ -919,6 +969,7 @@
 
       const handGeo = new THREE.SphereGeometry(0.04, 16, 16);
       const handMat = new THREE.MeshStandardMaterial({ color: 0x0088aa, roughness: 0.3 });
+      registerMaterial(handMat);
 
       grip1.add(new THREE.Mesh(handGeo, handMat));
       grip2.add(new THREE.Mesh(handGeo, handMat));
@@ -1063,6 +1114,26 @@
         }
       }
 
+      // Smoothly shift colors across all objects in the world based on sanity level
+      let sanityFactor = Math.max(0, Math.min(1, sanity / 100)); // 1 = Normal colors, 0 = Full distort/red
+      let targetHSL = { h: 0, s: 1.0, l: 0.5 }; // Red/Corrupted hue target at 0 sanity
+
+      for (let i = 0; i < allMaterials.length; i++) {
+        let mat = allMaterials[i];
+        if (mat && mat.color && mat.userData && mat.userData.baseColor) {
+          let base = mat.userData.baseColor;
+          
+          let baseHSL = {};
+          base.getHSL(baseHSL);
+
+          let currentH = THREE.MathUtils.lerp(targetHSL.h, baseHSL.h, sanityFactor);
+          let currentS = THREE.MathUtils.lerp(targetHSL.s, baseHSL.s, sanityFactor);
+          let currentL = THREE.MathUtils.lerp(targetHSL.l, baseHSL.l, sanityFactor);
+
+          mat.color.setHSL(currentH, currentS, currentL);
+        }
+      }
+
       if (sanity < 35 && cookieMonsters.length === 0) {
         spawnCookieMonster();
       }
@@ -1158,6 +1229,7 @@
 
           if (eye.userData.hp <= 0) {
             spawnCrystalsAt(eye.position, 5);
+            unregisterMaterial(eye.material);
             scene.remove(eye);
             eyeMonsters.splice(i, 1);
             checkActiveChasers();
@@ -1209,6 +1281,7 @@
 
         if (distToSword < 2.2 && swordVelocity > 0.035 && !hasGun) {
           spawnCrystalsAt(cookie.position, 5);
+          unregisterMaterial(cookie.material);
           scene.remove(cookie);
           cookieMonsters.splice(i, 1);
           checkActiveChasers();
@@ -1246,6 +1319,7 @@
           sanity = Math.min(100, sanity + 35);
           playSound(520, 'sine', 0.15);
           triggerHaptic('both', 0.4, 100);
+          unregisterMaterial(item.mesh.material);
           item.group.remove(item.mesh);
           foodApples.splice(i, 1);
         }
@@ -1260,6 +1334,7 @@
           crystalsCollected++;
           playSound(880, 'triangle', 0.25);
           triggerHaptic('both', 0.6, 150);
+          unregisterMaterial(item.mesh.material);
           if (item.group && item.group.remove) {
             item.group.remove(item.mesh);
           } else {
@@ -1352,22 +1427,6 @@
       processThumbstickLocomotion();
       updateDayNightCycle(deltaTime);
       updateCombatAndInteractions();
-
-      const trippyOverlay = document.getElementById('trippy-overlay');
-      if (sanity < 40) {
-        if (trippyOverlay) trippyOverlay.style.display = 'block';
-        const intensity = (40 - sanity) / 40;
-        camera.rotation.z = Math.sin(now * 0.003) * 0.15 * intensity;
-        camera.fov = 75 + Math.sin(now * 0.005) * 15 * intensity;
-        camera.updateProjectionMatrix();
-      } else {
-        if (trippyOverlay) trippyOverlay.style.display = 'none';
-        camera.rotation.z = 0;
-        if (camera.fov !== 75) {
-          camera.fov = 75;
-          camera.updateProjectionMatrix();
-        }
-      }
 
       if (skySphereMesh) {
         skySphereMesh.position.copy(cameraGroup.position);
