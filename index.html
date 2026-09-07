@@ -64,6 +64,7 @@
 
   <!-- Audio Elements -->
   <audio id="bg-music" src="https://www.image2url.com/r2/default/audio/1788736134916-726630de-e91a-4478-a281-4413564358c7.mp3" loop autoplay></audio>
+  <audio id="night-music" src="https://www.image2url.com/r2/default/audio/1788820777881-88761674-947b-4b5a-a927-d4703de64eb3.mp3" loop preload="auto"></audio>
   <audio id="monster-scream" src="https://www.image2url.com/r2/default/audio/1788749739268-96f59017-2cba-4e49-85bb-0fbd98ff2fde.mp3" loop preload="auto"></audio>
 
   <button id="vr-button">ENTER REALISTIC VR SURVIVAL</button>
@@ -849,8 +850,6 @@
           }
         }
       }
-
-      // REMOVED: Gun shooting logic no longer damages Cookie Monsters (they are now invincible)
     }
 
     function spawnEyeMonsters(count) {
@@ -1085,8 +1084,13 @@
       }
 
       const bgAudio = document.getElementById('bg-music');
-      if (bgAudio) {
+      const nightAudio = document.getElementById('night-music');
+
+      if (bgAudio && !isNight) {
         bgAudio.playbackRate = 0.5 + (sanity / 100) * 0.5;
+      }
+      if (nightAudio && isNight) {
+        nightAudio.playbackRate = 0.5 + (sanity / 100) * 0.5;
       }
 
       if (sanity < 35 && cookieMonsters.length === 0) {
@@ -1103,6 +1107,10 @@
 
         if (isNight) {
           if (bgAudio) bgAudio.pause();
+          if (nightAudio) {
+            nightAudio.currentTime = 0;
+            nightAudio.play().catch(e => console.log("Audio play blocked:", e));
+          }
           skySphereMesh.material.map = nightSkyTexture;
           skySphereMesh.material.needsUpdate = true;
           scene.fog.color.setHex(0x050515);
@@ -1115,6 +1123,7 @@
           spawnEyeMonsters(5 + Math.min(10, daysSurvived * 2));
           triggerHaptic('both', 0.8, 300);
         } else {
+          if (nightAudio) nightAudio.pause();
           if (bgAudio) bgAudio.play().catch(e => console.log("Audio play blocked:", e));
           daysSurvived++;
           skySphereMesh.material.map = daySkyTexture;
@@ -1224,7 +1233,6 @@
         }
       }
 
-      // INVINCIBLE COOKIE MONSTER: Player attacks do not damage or destroy it anymore
       for (let i = cookieMonsters.length - 1; i >= 0; i--) {
         const cookie = cookieMonsters[i];
         const dirToPlayer = new THREE.Vector3().subVectors(playerPos, cookie.position);
