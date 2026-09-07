@@ -66,7 +66,7 @@
   <audio id="bg-music" src="https://www.image2url.com/r2/default/audio/1788736134916-726630de-e91a-4478-a281-4413564358c7.mp3" loop autoplay></audio>
 
   <button id="vr-button">ENTER REALISTIC VR SURVIVAL</button>
-  <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | CRYSTALS: 0 | DAY 1</div>
+  <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | SANITY: 100 | CRYSTALS: 0 | DAY 1</div>
   <div id="damage-overlay"></div>
 
   <script>
@@ -77,6 +77,7 @@
     // Game Stats
     let health = 100;
     let hunger = 100;
+    let sanity = 100;
     let crystalsCollected = 0;
     let daysSurvived = 1;
     let isNight = false;
@@ -105,9 +106,11 @@
     // Colliders & Entities
     let colliders = []; 
     let eyeMonsters = [];
+    let cookieMonsters = [];
     let foodApples = [];
     let dreamCrystals = [];
     let audioCtx = null;
+    let cookieTexture = null;
 
     // Motion & VR Controls
     let controller1, controller2;
@@ -230,12 +233,15 @@
     function resetPlayerPosition() {
       health = 100;
       hunger = 100;
+      sanity = 100;
       crystalsCollected = 0;
       daysSurvived = 1;
       damageMultiplier = 1;
       speedUpgradeLevel = 0;
       speedBoostTimer = 0;
       isGameOver = false;
+      
+      clearCookieMonsters();
       
       let spawnX = 0;
       let spawnZ = 0;
@@ -281,6 +287,8 @@
 
       daySkyTexture = textureLoader.load('https://i.postimg.cc/BZzpfnTN/images-(7).jpg');
       nightSkyTexture = textureLoader.load('https://i.postimg.cc/FKGbWrFs/images-(8).jpg');
+      
+      cookieTexture = textureLoader.load('https://i.postimg.cc/dV4NDkL0/pngtree-chocolate-chip-cookie-icon-white-background-png-image-16100260.png');
 
       const skyGeo = new THREE.SphereGeometry(750, 60, 40);
       const skyMat = new THREE.MeshBasicMaterial({ map: daySkyTexture, side: THREE.BackSide });
@@ -462,9 +470,10 @@
         colliders.push({ type: 'cylinder', x: tX, z: tZ, radius: 0.5, group: group });
       }
 
-      for (let i = 0; i < 3; i++) {
-        const aX = offsetX + Math.abs(pseudoRandom(offsetX + i, offsetZ)) * CHUNK_SIZE;
-        const aZ = offsetZ + Math.abs(pseudoRandom(offsetX, offsetZ + i)) * CHUNK_SIZE;
+      // Decreased apple spawn chance to make them rarer and harder to find
+      if (Math.abs(pseudoRandom(offsetX * 3, offsetZ * 3)) > 0.7) {
+        const aX = offsetX + Math.abs(pseudoRandom(offsetX + 7, offsetZ)) * CHUNK_SIZE;
+        const aZ = offsetZ + Math.abs(pseudoRandom(offsetX, offsetZ + 7)) * CHUNK_SIZE;
         const aY = getTerrainHeight(aX, aZ) + 0.35;
 
         const appleGeo = new THREE.SphereGeometry(0.22, 16, 16);
@@ -588,38 +597,49 @@
       watchCtx.fillStyle = '#ffffff';
       watchCtx.font = 'bold 18px sans-serif';
       watchCtx.textAlign = 'center';
-      watchCtx.fillText(`DAY ${daysSurvived} SURVIVAL`, 128, 30);
+      watchCtx.fillText(`DAY ${daysSurvived} SURVIVAL`, 128, 28);
 
+      // HP Bar
       watchCtx.fillStyle = '#440000';
-      watchCtx.fillRect(20, 42, 216, 32);
+      watchCtx.fillRect(20, 38, 216, 26);
       watchCtx.fillStyle = '#ff2222';
-      watchCtx.fillRect(20, 42, (health / 100) * 216, 32);
+      watchCtx.fillRect(20, 38, (health / 100) * 216, 26);
       watchCtx.strokeStyle = '#ffffff';
       watchCtx.lineWidth = 2;
-      watchCtx.strokeRect(20, 42, 216, 32);
+      watchCtx.strokeRect(20, 38, 216, 26);
       watchCtx.fillStyle = '#ffffff';
-      watchCtx.font = 'bold 15px sans-serif';
-      watchCtx.fillText(`HP: ${Math.round(health)}`, 128, 63);
+      watchCtx.font = 'bold 13px sans-serif';
+      watchCtx.fillText(`HP: ${Math.round(health)}`, 128, 55);
 
+      // Hunger Bar
       watchCtx.fillStyle = '#443300';
-      watchCtx.fillRect(20, 82, 216, 32);
+      watchCtx.fillRect(20, 70, 216, 26);
       watchCtx.fillStyle = '#ffaa00';
-      watchCtx.fillRect(20, 82, (hunger / 100) * 216, 32);
-      watchCtx.strokeRect(20, 82, 216, 32);
+      watchCtx.fillRect(20, 70, (hunger / 100) * 216, 26);
+      watchCtx.strokeRect(20, 70, 216, 26);
       watchCtx.fillStyle = '#ffffff';
-      watchCtx.fillText(`HUNGER: ${Math.round(hunger)}`, 128, 103);
+      watchCtx.fillText(`HUNGER: ${Math.round(hunger)}`, 128, 87);
+
+      // Sanity Bar
+      watchCtx.fillStyle = '#110033';
+      watchCtx.fillRect(20, 102, 216, 26);
+      watchCtx.fillStyle = '#aa00ff';
+      watchCtx.fillRect(20, 102, (sanity / 100) * 216, 26);
+      watchCtx.strokeRect(20, 102, 216, 26);
+      watchCtx.fillStyle = '#ffffff';
+      watchCtx.fillText(`SANITY: ${Math.round(sanity)}`, 128, 119);
 
       watchCtx.fillStyle = '#00ffff';
-      watchCtx.font = 'bold 15px sans-serif';
-      watchCtx.fillText(`CRYSTALS: ${crystalsCollected}`, 128, 138);
+      watchCtx.font = 'bold 14px sans-serif';
+      watchCtx.fillText(`CRYSTALS: ${crystalsCollected}`, 128, 148);
 
       watchCtx.fillStyle = '#ffff00';
-      watchCtx.font = 'bold 13px sans-serif';
-      watchCtx.fillText(`PWR: x${damageMultiplier.toFixed(1)} | SPD: +${speedUpgradeLevel * 20}%`, 128, 160);
+      watchCtx.font = 'bold 12px sans-serif';
+      watchCtx.fillText(`PWR: x${damageMultiplier.toFixed(1)} | SPD: +${speedUpgradeLevel * 20}%`, 128, 170);
 
       const playerSafe = isInsideSafeZone(cameraGroup.position.x, cameraGroup.position.z);
       watchCtx.fillStyle = playerSafe ? '#00ffcc' : (isNight ? '#ff3333' : '#33ff33');
-      watchCtx.font = 'bold 13px sans-serif';
+      watchCtx.font = 'bold 12px sans-serif';
       watchCtx.fillText(playerSafe ? 'SAFE ZONE' : (isNight ? 'NIGHT: EYE SWARM' : 'A-BTN: HEAL/SPEED BOOST'), 128, 205);
 
       if (watchTexture) watchTexture.needsUpdate = true;
@@ -662,7 +682,6 @@
         const eye = new THREE.Sprite(mat);
         const playerPos = cameraGroup.position;
         
-        // Evenly spread out in a full circle around the player at a wide distance
         const angle = (i / count) * Math.PI * 2 + (Math.random() * 0.4 - 0.2);
         const dist = 45 + Math.random() * 35;
 
@@ -691,9 +710,40 @@
       }
     }
 
+    function spawnCookieMonster() {
+      if (!cookieTexture) return;
+      const mat = new THREE.SpriteMaterial({ map: cookieTexture, transparent: true });
+      const cookie = new THREE.Sprite(mat);
+      const playerPos = cameraGroup.position;
+
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 30 + Math.random() * 20;
+
+      const cx = playerPos.x + Math.cos(angle) * dist;
+      const cz = playerPos.z + Math.sin(angle) * dist;
+      const cy = getTerrainHeight(cx, cz) + 2.0;
+
+      cookie.position.set(cx, cy, cz);
+      cookie.scale.set(3.5, 3.5, 1);
+
+      cookie.userData = {
+        hp: 4,
+        speed: 0.08,
+        damage: 0.8
+      };
+
+      scene.add(cookie);
+      cookieMonsters.push(cookie);
+    }
+
     function clearEyeMonsters() {
       eyeMonsters.forEach(eye => scene.remove(eye));
       eyeMonsters = [];
+    }
+
+    function clearCookieMonsters() {
+      cookieMonsters.forEach(c => scene.remove(c));
+      cookieMonsters = [];
     }
 
     function setupControllers() {
@@ -742,7 +792,8 @@
       if (crystalsCollected > 0) {
         crystalsCollected--;
         health = Math.min(100, health + 50);
-        speedBoostTimer = 12.0; // 12 seconds of speed boost
+        sanity = Math.min(100, sanity + 30);
+        speedBoostTimer = 12.0; 
         playSound(1050, 'triangle', 0.4);
         triggerHaptic('both', 0.8, 200);
       }
@@ -762,7 +813,6 @@
         const axes = source.gamepad.axes;
         const buttons = source.gamepad.buttons;
 
-        // Button A or Trigger / Grip action to consume Crystal for immediate Heal/Boost
         const primaryButtonPressed = buttons[4] && buttons[4].pressed || (buttons[0] && buttons[0].pressed && source.handedness === 'right');
         if (primaryButtonPressed && canUseCrystal) {
           useCrystalConsumable();
@@ -831,6 +881,30 @@
         health = Math.max(0, health - deltaTime * 2.5);
       }
 
+      // Sanity Mechanics
+      const playerPos = cameraGroup.position.clone();
+      const playerSafe = isInsideSafeZone(playerPos.x, playerPos.z);
+      
+      if (isNight) {
+        sanity = Math.max(0, sanity - deltaTime * 1.5);
+      } else {
+        if (playerSafe) {
+          sanity = Math.min(100, sanity + deltaTime * 2.0);
+        } else {
+          sanity = Math.max(0, sanity - deltaTime * 0.3);
+        }
+      }
+
+      // Spawn Cookie Monster hallucination when sanity is low (< 35)
+      if (sanity < 35 && cookieMonsters.length < 2 && Math.random() < 0.015) {
+        spawnCookieMonster();
+      }
+
+      // Despawn Cookie Monsters if sanity recovers completely
+      if (sanity > 50 && cookieMonsters.length > 0) {
+        clearCookieMonsters();
+      }
+
       if (dayNightTimer >= 40) {
         dayNightTimer = 0;
         isNight = !isNight;
@@ -886,6 +960,7 @@
       const playerPos = cameraGroup.position.clone();
       const playerSafe = isInsideSafeZone(playerPos.x, playerPos.z);
 
+      // Eye Monsters Combat
       for (let i = eyeMonsters.length - 1; i >= 0; i--) {
         const eye = eyeMonsters[i];
         const distToSword = currSwordWorldPos.distanceTo(eye.position);
@@ -940,6 +1015,46 @@
         }
       }
 
+      // Cookie Monster (Sanity Monster) Combat & Pursuit
+      for (let i = cookieMonsters.length - 1; i >= 0; i--) {
+        const cookie = cookieMonsters[i];
+        const distToSword = currSwordWorldPos.distanceTo(cookie.position);
+
+        if (distToSword < 2.2 && swordVelocity > 0.035) {
+          cookie.userData.hp -= 1 * damageMultiplier;
+          playSound(180, 'sawtooth', 0.15);
+          triggerHaptic('right', 0.9, 120);
+
+          const pushDir = new THREE.Vector3().subVectors(cookie.position, currSwordWorldPos).normalize();
+          cookie.position.addScaledVector(pushDir, 3.0);
+
+          if (cookie.userData.hp <= 0) {
+            scene.remove(cookie);
+            cookieMonsters.splice(i, 1);
+          }
+        } else {
+          const dirToPlayer = new THREE.Vector3().subVectors(playerPos, cookie.position);
+          const distToPlayer = dirToPlayer.length();
+
+          if (!playerSafe) {
+            if (distToPlayer <= 1.5) {
+              health = Math.max(0, health - cookie.userData.damage);
+              sanity = Math.max(0, sanity - 1.0);
+              triggerDamageFlash();
+              triggerHaptic('both', 0.8, 100);
+            } else {
+              dirToPlayer.normalize();
+              const nextMonsterPos = cookie.position.clone().addScaledVector(dirToPlayer, cookie.userData.speed);
+              if (!checkCollision(nextMonsterPos.x, nextMonsterPos.z)) {
+                cookie.position.copy(nextMonsterPos);
+                cookie.position.y = getTerrainHeight(cookie.position.x, cookie.position.z) + 2.0;
+              }
+            }
+          }
+        }
+      }
+
+      // Eating Apples Restores Sanity
       for (let i = foodApples.length - 1; i >= 0; i--) {
         const item = foodApples[i];
         const appleWorldPos = new THREE.Vector3();
@@ -948,6 +1063,7 @@
         if (playerPos.distanceTo(appleWorldPos) < 2.0) {
           hunger = Math.min(100, hunger + 30);
           health = Math.min(100, health + 15);
+          sanity = Math.min(100, sanity + 35); // Restores sanity
           playSound(520, 'sine', 0.15);
           triggerHaptic('both', 0.4, 100);
           item.group.remove(item.mesh);
@@ -982,6 +1098,7 @@
       triggerHaptic('both', 1.0, 500);
       alert(`You perished in the Dreamcore Hills on Day ${daysSurvived}!\nCrystals Collected: ${crystalsCollected}`);
       clearEyeMonsters();
+      clearCookieMonsters();
       resetPlayerPosition();
     }
 
@@ -1006,7 +1123,7 @@
     function update2DUI() {
       const ui = document.getElementById('objective-ui');
       const playerSafe = isInsideSafeZone(cameraGroup.position.x, cameraGroup.position.z);
-      ui.innerText = `HEALTH: ${Math.round(health)} | HUNGER: ${Math.round(hunger)} | CRYSTALS: ${crystalsCollected} (A-Btn: Consume) | DAY ${daysSurvived}`;
+      ui.innerText = `HEALTH: ${Math.round(health)} | HUNGER: ${Math.round(hunger)} | SANITY: ${Math.round(sanity)} | CRYSTALS: ${crystalsCollected} (A-Btn: Consume) | DAY ${daysSurvived}`;
       ui.style.color = playerSafe ? '#00ffcc' : (isNight ? '#ff4444' : '#00ffff');
     }
 
