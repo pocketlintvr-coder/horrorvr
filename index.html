@@ -76,7 +76,7 @@
     let ambientLight, sunLight, flashlight;
     let skySphereMesh, daySkyTexture, nightSkyTexture, customGrassTexture;
 
-    // In-Camera HUD Overlay for VR-compatible Sanity Shader Effects
+    // VR-compatible Sanity Shader Overlay
     let sanityOverlayMesh, sanityMaterial;
 
     // Game Stats
@@ -94,7 +94,7 @@
     let speedUpgradeLevel = 0;
     let speedBoostTimer = 0;
 
-    // Seamless Web Audio Buffer handling for Night Loop
+    // Web Audio Buffer for Night Loop
     let nightAudioBuffer = null;
     let nightSourceNode = null;
     let nightGainNode = null;
@@ -302,7 +302,7 @@
 
       document.body.appendChild(renderer.domElement);
 
-      // WebXR VR-Compatible Sanity Overlay Screen
+      // Sanity Overlay Shader Mesh for WebXR VR tracking
       sanityMaterial = new THREE.ShaderMaterial({
         uniforms: {
           uSanity: { value: 1.0 },
@@ -315,7 +315,7 @@
           varying vec2 vUv;
           void main() {
             vUv = uv;
-            gl_Position = vec4(position, 1.0);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
           }
         `,
         fragmentShader: `
@@ -327,7 +327,6 @@
             float sanityFactor = 1.0 - smoothstep(0.0, 0.65, uSanity);
             vec2 uvCentered = (vUv - 0.5) * 2.0;
             
-            // Pulsing Vignette & Low Sanity Distortion Tint
             float dist = length(uvCentered);
             float vignette = smoothstep(0.3, 1.2, dist) * sanityFactor * 0.85;
             float pulse = (sin(uTime * 4.0) * 0.15 + 0.85) * sanityFactor;
@@ -338,9 +337,9 @@
         `
       });
 
-      sanityOverlayMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), sanityMaterial);
-      sanityOverlayMesh.frustumCulled = false;
-      camera.add(sanityOverlayMesh);
+      sanityOverlayMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8), sanityMaterial);
+      sanityOverlayMesh.renderOrder = 999;
+      cameraGroup.add(sanityOverlayMesh);
 
       ambientLight = new THREE.AmbientLight(0xddeeff, 0.6);
       scene.add(ambientLight);
@@ -901,19 +900,8 @@
           }
         }
       }
-
-      for (let i = cookieMonsters.length - 1; i >= 0; i--) {
-        const cookie = cookieMonsters[i];
-        if (cookie.position.distanceTo(gunWorldPos) < 35.0) {
-          cookie.userData.hp -= 10;
-          if (cookie.userData.hp <= 0) {
-            spawnCrystalsAt(cookie.position, 6);
-            scene.remove(cookie);
-            cookieMonsters.splice(i, 1);
-            checkActiveChasers();
-          }
-        }
-      }
+      
+      // Cookie monster is invincible - bullets do not kill or hurt it
     }
 
     function spawnEyeMonsters(count) {
@@ -970,8 +958,8 @@
       cookie.position.set(cx, cy, cz);
       cookie.scale.set(8.0, 8.0, 1);
 
+      // Invincible Cookie Monster configuration
       cookie.userData = {
-        hp: 5 + Math.floor(daysSurvived * 0.8),
         speed: 0.18,
         damage: 1.2,
         isChasing: true
@@ -1291,40 +1279,23 @@
         }
       }
 
+      // Invincible Cookie Monster Logic
       for (let i = cookieMonsters.length - 1; i >= 0; i--) {
         const cookie = cookieMonsters[i];
-        const distToSword = currSwordWorldPos.distanceTo(cookie.position);
+        const dirToPlayer = new THREE.Vector3().subVectors(playerPos, cookie.position);
+        const distToPlayer = dirToPlayer.length();
 
-        if (distToSword < 3.2 && swordVelocity > 0.035 && !hasGun) {
-          cookie.userData.hp -= 1 * damageMultiplier;
-          playSound(260, 'sawtooth', 0.15);
-          triggerHaptic('right', 0.9, 120);
-
-          const pushDir = new THREE.Vector3().subVectors(cookie.position, currSwordWorldPos).normalize();
-          cookie.position.addScaledVector(pushDir, 3.5);
-
-          if (cookie.userData.hp <= 0) {
-            spawnCrystalsAt(cookie.position, 6);
-            scene.remove(cookie);
-            cookieMonsters.splice(i, 1);
-            checkActiveChasers();
-          }
-        } else {
-          const dirToPlayer = new THREE.Vector3().subVectors(playerPos, cookie.position);
-          const distToPlayer = dirToPlayer.length();
-
-          if (!playerSafe) {
-            if (distToPlayer <= 2.5) {
-              health = Math.max(0, health - cookie.userData.damage);
-              triggerDamageFlash();
-              triggerHaptic('both', 0.8, 100);
-            } else {
-              dirToPlayer.normalize();
-              const nextMonsterPos = cookie.position.clone().addScaledVector(dirToPlayer, cookie.userData.speed);
-              if (!checkCollision(nextMonsterPos.x, nextMonsterPos.z)) {
-                cookie.position.copy(nextMonsterPos);
-                cookie.position.y = getTerrainHeight(cookie.position.x, cookie.position.z) + 4.0;
-              }
+        if (!playerSafe) {
+          if (distToPlayer <= 2.5) {
+            health = Math.max(0, health - cookie.userData.damage);
+            triggerDamageFlash();
+            triggerHaptic('both', 0.8, 100);
+          } else {
+            dirToPlayer.normalize();
+            const nextMonsterPos = cookie.position.clone().addScaledVector(dirToPlayer, cookie.userData.speed);
+            if (!checkCollision(nextMonsterPos.x, nextMonsterPos.z)) {
+              cookie.position.copy(nextMonsterPos);
+              cookie.position.y = getTerrainHeight(cookie.position.x, cookie.position.z) + 4.0;
             }
           }
         }
@@ -1447,6 +1418,18 @@
       processThumbstickLocomotion();
       updateDayNightCycle(deltaTime);
       updateCombatAndInteractions();
+
+      // Lock WebXR low-sanity visual overlay mesh in front of active VR view
+      const xrCamera = renderer.xr.getCamera(camera);
+      const targetCam = renderer.xr.isPresenting ? xrCamera : camera;
+      
+      const camWorldPos = new THREE.Vector3();
+      const camWorldDir = new THREE.Vector3();
+      targetCam.getWorldPosition(camWorldPos);
+      targetCam.getWorldDirection(camWorldDir);
+
+      sanityOverlayMesh.position.copy(camWorldPos).addScaledVector(camWorldDir, 0.3);
+      sanityOverlayMesh.quaternion.copy(targetCam.quaternion);
 
       if (sanityMaterial) {
         sanityMaterial.uniforms.uSanity.value = sanity / 100;
