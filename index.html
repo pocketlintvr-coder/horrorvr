@@ -62,8 +62,9 @@
 </head>
 <body>
 
-  <!-- Background Audio Loop -->
+  <!-- Audio Elements -->
   <audio id="bg-music" src="https://www.image2url.com/r2/default/audio/1788736134916-726630de-e91a-4478-a281-4413564358c7.mp3" loop autoplay></audio>
+  <audio id="monster-scream" src="https://www.image2url.com/r2/default/audio/1788749739268-96f59017-2cba-4e49-85bb-0fbd98ff2fde.mp3" preload="auto"></audio>
 
   <button id="vr-button">ENTER REALISTIC VR SURVIVAL</button>
   <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | SANITY: 100 | CRYSTALS: 0 | DAY 1</div>
@@ -133,7 +134,7 @@
     function SmoothNoise(x, z) {
       const corners = (MathNoise(x-1, z-1) + MathNoise(x+1, z-1) + MathNoise(x-1, z+1) + MathNoise(x+1, z+1)) / 16;
       const sides = (MathNoise(x-1, z) + MathNoise(x+1, z-1) + MathNoise(x-1, z) + MathNoise(x, z+1)) / 8;
-      const center = MathNoise(x, z) / 4;
+      const center = MathNoise(x) / 4;
       return corners + sides + center;
     }
 
@@ -164,6 +165,14 @@
       total += Math.sin(x * 0.03) * Math.cos(z * 0.03) * 4.0;
 
       return total;
+    }
+
+    function playMonsterChaseSound() {
+      const screamAudio = document.getElementById('monster-scream');
+      if (screamAudio) {
+        screamAudio.currentTime = 0;
+        screamAudio.play().catch(e => console.log("Audio play blocked:", e));
+      }
     }
 
     init();
@@ -470,7 +479,6 @@
         colliders.push({ type: 'cylinder', x: tX, z: tZ, radius: 0.5, group: group });
       }
 
-      // Rare apple spawns
       if (Math.abs(pseudoRandom(offsetX * 3, offsetZ * 3)) > 0.7) {
         const aX = offsetX + Math.abs(pseudoRandom(offsetX + 7, offsetZ)) * CHUNK_SIZE;
         const aZ = offsetZ + Math.abs(pseudoRandom(offsetX, offsetZ + 7)) * CHUNK_SIZE;
@@ -703,7 +711,8 @@
           speed: 0.07 + Math.random() * 0.03,
           state: 'scatter',
           wanderDir: wanderDir,
-          detectionRadius: 28 + Math.random() * 10
+          detectionRadius: 28 + Math.random() * 10,
+          hasChased: false
         };
         scene.add(eye);
         eyeMonsters.push(eye);
@@ -733,6 +742,8 @@
 
       scene.add(cookie);
       cookieMonsters.push(cookie);
+      
+      playMonsterChaseSound();
     }
 
     function clearEyeMonsters() {
@@ -894,12 +905,10 @@
         }
       }
 
-      // Spawn indestructible Cookie Monster hallucination when sanity is low (< 35)
       if (sanity < 35 && cookieMonsters.length === 0) {
         spawnCookieMonster();
       }
 
-      // Despawn Cookie Monster when sanity goes back up (>= 35)
       if (sanity >= 35 && cookieMonsters.length > 0) {
         clearCookieMonsters();
       }
@@ -989,6 +998,10 @@
               if (eye.userData.state === 'scatter') {
                 if (distToPlayer < eye.userData.detectionRadius) {
                   eye.userData.state = 'chase';
+                  if (!eye.userData.hasChased) {
+                    playMonsterChaseSound();
+                    eye.userData.hasChased = true;
+                  }
                 } else {
                   const wanderMove = eye.userData.wanderDir.clone().multiplyScalar(eye.userData.speed * 0.5);
                   const nextMonsterPos = eye.position.clone().add(wanderMove);
@@ -1014,7 +1027,7 @@
         }
       }
 
-      // Cookie Monster (Persistent Pursuit Hallucination)
+      // Cookie Monster
       for (let i = cookieMonsters.length - 1; i >= 0; i--) {
         const cookie = cookieMonsters[i];
         const dirToPlayer = new THREE.Vector3().subVectors(playerPos, cookie.position);
@@ -1036,7 +1049,6 @@
         }
       }
 
-      // Eating Apples Restores Sanity
       for (let i = foodApples.length - 1; i >= 0; i--) {
         const item = foodApples[i];
         const appleWorldPos = new THREE.Vector3();
@@ -1045,7 +1057,7 @@
         if (playerPos.distanceTo(appleWorldPos) < 2.0) {
           hunger = Math.min(100, hunger + 30);
           health = Math.min(100, health + 15);
-          sanity = Math.min(100, sanity + 35); // Restores sanity
+          sanity = Math.min(100, sanity + 35);
           playSound(520, 'sine', 0.15);
           triggerHaptic('both', 0.4, 100);
           item.group.remove(item.mesh);
