@@ -63,7 +63,8 @@
 <body>
 
   <!-- Audio Elements -->
-  <audio id="bg-music" src="https://www.image2url.com/r2/default/audio/1788736134916-726630de-e91a-4478-a281-4413564358c7.mp3" loop></audio>
+  <audio id="bg-music" src="https://www.image2url.com/r2/default/audio/1788736134916-726630de-e91a-4478-a281-4413564358c7.mp3" loop autoplay></audio>
+  <audio id="monster-scream" src="https://www.image2url.com/r2/default/audio/1788749739268-96f59017-2cba-4e49-85bb-0fbd98ff2fde.mp3" loop preload="auto"></audio>
 
   <button id="vr-button">ENTER REALISTIC VR SURVIVAL</button>
   <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | SANITY: 100 | CRYSTALS: 0 | AMMO: 0 | DAY 1</div>
@@ -74,6 +75,10 @@
     let ambientLight, sunLight, flashlight;
     let skySphereMesh, daySkyTexture, nightSkyTexture, customGrassTexture;
 
+    // Web Audio Nodes for Pitch & Distortion Effect
+    let webAudioSourceNode = null;
+    let webAudioScreamNode = null;
+
     // Game Stats
     let health = 100;
     let hunger = 100;
@@ -83,20 +88,6 @@
     let isNight = false;
     let dayNightTimer = 0;
     let isGameOver = false;
-
-    // Audio Distortion Nodes
-    let audioCtx = null;
-    let bgAudioSource = null;
-    let biquadFilter = null;
-    let audioDistortionNode = null;
-    let oscDrone = null;
-
-    // Visual Trippy Effect Storage
-    let terrainMaterials = [];
-    const baseDayColor = new THREE.Color(0xddeeff);
-    const baseNightColor = new THREE.Color(0x222244);
-    const baseFogDay = new THREE.Color(0xaaccff);
-    const baseFogNight = new THREE.Color(0x050515);
 
     // Upgrades System
     let damageMultiplier = 1;
@@ -128,6 +119,7 @@
     let foodApples = [];
     let dreamCrystals = [];
     let groundGuns = [];
+    let audioCtx = null;
     let cookieTexture = null;
 
     // Motion & VR Controls
@@ -183,35 +175,58 @@
       return total;
     }
 
-    function initWebAudio() {
-      if (audioCtx) return;
-      
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      audioCtx = new AudioContext();
+    function setupAudioNodes() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
 
-      const bgAudioEl = document.getElementById('bg-music');
-      if (bgAudioEl) {
-        bgAudioSource = audioCtx.createMediaElementSource(bgAudioEl);
+      const bgAudio = document.getElementById('bg-music');
+      if (bgAudio && !webAudioSourceNode) {
+        try {
+          webAudioSourceNode = audioCtx.createMediaElementSource(bgAudio);
+          webAudioSourceNode.connect(audioCtx.destination);
+        } catch (e) {
+          console.log("Audio source setup:", e);
+        }
+      }
 
-        biquadFilter = audioCtx.createBiquadFilter();
-        biquadFilter.type = 'lowpass';
-        biquadFilter.frequency.value = 20000;
+      const screamAudio = document.getElementById('monster-scream');
+      if (screamAudio && !webAudioScreamNode) {
+        try {
+          webAudioScreamNode = audioCtx.createMediaElementSource(screamAudio);
+          webAudioScreamNode.connect(audioCtx.destination);
+        } catch (e) {
+          console.log("Audio scream node setup:", e);
+        }
+      }
+    }
 
-        oscDrone = audioCtx.createOscillator();
-        oscDrone.type = 'sawtooth';
-        oscDrone.frequency.value = 55; // Low pitch drone
-        
-        const droneGain = audioCtx.createGain();
-        droneGain.gain.value = 0.0; // Starts silent
+    function playMonsterChaseSound() {
+      setupAudioNodes();
+      const screamAudio = document.getElementById('monster-scream');
+      if (screamAudio) {
+        if (screamAudio.paused) {
+          screamAudio.currentTime = 0;
+          screamAudio.play().catch(e => console.log("Audio play blocked:", e));
+        }
+      }
+    }
 
-        oscDrone.connect(droneGain);
-        droneGain.connect(audioCtx.destination);
-        oscDrone.start();
+    function stopMonsterChaseSound() {
+      const screamAudio = document.getElementById('monster-scream');
+      if (screamAudio) {
+        screamAudio.pause();
+        screamAudio.currentTime = 0;
+      }
+    }
 
-        bgAudioSource.connect(biquadFilter);
-        biquadFilter.connect(audioCtx.destination);
-        
-        oscDrone.droneGainNode = droneGain;
+    function checkActiveChasers() {
+      let activeChaserExists = eyeMonsters.some(e => e.userData.isChasing) || cookieMonsters.some(c => c.userData.isChasing);
+      if (!activeChaserExists) {
+        stopMonsterChaseSound();
       }
     }
 
@@ -314,6 +329,7 @@
         gunMesh.visible = false;
       }
       
+      stopMonsterChaseSound();
       clearCookieMonsters();
       
       let spawnX = 0;
@@ -431,8 +447,6 @@
         roughness: 0.7, 
         metalness: 0.05
       });
-      
-      terrainMaterials.push(grassMat);
 
       const terrain = new THREE.Mesh(geo, grassMat);
       terrain.position.set(worldOffsetX + CHUNK_SIZE / 2, 0, worldOffsetZ + CHUNK_SIZE / 2);
@@ -528,6 +542,7 @@
         roof.castShadow = true;
         houseGroup.add(roof);
 
+        // Rare Firearm Loot Spawn inside the House (~25% chance per house)
         if (Math.abs(pseudoRandom(hX * 2, hZ * 2)) > 0.75) {
           const gunLoot = createGunModel();
           gunLoot.position.set(hX, hY + 0.6, hZ);
@@ -612,10 +627,6 @@
 
       group.traverse(child => {
         if (child.isMesh) {
-          if (terrainMaterials.includes(child.material)) {
-            const idx = terrainMaterials.indexOf(child.material);
-            if (idx > -1) terrainMaterials.splice(idx, 1);
-          }
           child.geometry.dispose();
           if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
           else child.material.dispose();
@@ -816,6 +827,7 @@
             spawnCrystalsAt(eye.position, 5);
             scene.remove(eye);
             eyeMonsters.splice(i, 1);
+            checkActiveChasers();
           }
         }
       }
@@ -826,6 +838,7 @@
           spawnCrystalsAt(cookie.position, 5);
           scene.remove(cookie);
           cookieMonsters.splice(i, 1);
+          checkActiveChasers();
         }
       }
     }
@@ -860,7 +873,8 @@
           speed: 0.07 + Math.random() * 0.03,
           state: 'scatter',
           wanderDir: wanderDir,
-          detectionRadius: 28 + Math.random() * 10
+          detectionRadius: 28 + Math.random() * 10,
+          isChasing: false
         };
         scene.add(eye);
         eyeMonsters.push(eye);
@@ -885,21 +899,26 @@
 
       cookie.userData = {
         speed: 0.085,
-        damage: 1.2
+        damage: 1.2,
+        isChasing: true
       };
 
       scene.add(cookie);
       cookieMonsters.push(cookie);
+      
+      playMonsterChaseSound();
     }
 
     function clearEyeMonsters() {
       eyeMonsters.forEach(eye => scene.remove(eye));
       eyeMonsters = [];
+      checkActiveChasers();
     }
 
     function clearCookieMonsters() {
       cookieMonsters.forEach(c => scene.remove(c));
       cookieMonsters = [];
+      checkActiveChasers();
     }
 
     function setupControllers() {
@@ -1030,66 +1049,6 @@
       }
     }
 
-    function applySanityVisualAndAudioEffects(time) {
-      if (sanity < 60) {
-        const factor = (60 - sanity) / 60; // 0 to 1
-
-        // 1. Visual Color Shift (Trippy Psychedelic Cycling)
-        const r = (Math.sin(time * 2) * 0.5 + 0.5) * factor;
-        const g = (Math.sin(time * 3 + 2) * 0.5 + 0.5) * factor;
-        const b = (Math.sin(time * 1.5 + 4) * 0.5 + 0.5) * factor;
-
-        // Apply shift to lighting and fog
-        ambientLight.color.setRGB(0.2 + r, 0.4 + g, 0.5 + b);
-        
-        const curFogBase = isNight ? baseFogNight : baseFogDay;
-        scene.fog.color.setRGB(
-          curFogBase.r + r * 0.5,
-          curFogBase.g + g * 0.5,
-          curFogBase.b + b * 0.5
-        );
-
-        // Apply shift to terrain textures
-        terrainMaterials.forEach(mat => {
-          if (mat) mat.color.setRGB(0.5 + r * 0.5, 0.5 + g * 0.5, 0.5 + b * 0.5);
-        });
-
-        // Camera wobbling/rotation distortion
-        camera.rotation.z = Math.sin(time * 2.5) * 0.12 * factor;
-
-        // 2. Audio Distortion
-        if (biquadFilter && oscDrone) {
-          // Lowpass filter muffles audio as sanity drops
-          biquadFilter.frequency.setValueAtTime(20000 - (factor * 18500), audioCtx.currentTime);
-
-          // Eerie Pitch Wobble & Drone Unlocked
-          const pitchDetune = Math.sin(time * 6) * 800 * factor;
-          oscDrone.detune.setValueAtTime(pitchDetune, audioCtx.currentTime);
-          if (oscDrone.droneGainNode) {
-            oscDrone.droneGainNode.gain.setValueAtTime(factor * 0.35, audioCtx.currentTime);
-          }
-        }
-      } else {
-        // Reset Visuals
-        ambientLight.color.copy(isNight ? baseNightColor : baseDayColor);
-        scene.fog.color.copy(isNight ? baseFogNight : baseFogDay);
-        camera.rotation.z = 0;
-
-        terrainMaterials.forEach(mat => {
-          if (mat) mat.color.setHex(0xffffff);
-        });
-
-        // Reset Audio
-        if (biquadFilter && oscDrone) {
-          biquadFilter.frequency.setValueAtTime(20000, audioCtx.currentTime);
-          oscDrone.detune.setValueAtTime(0, audioCtx.currentTime);
-          if (oscDrone.droneGainNode) {
-            oscDrone.droneGainNode.gain.setValueAtTime(0.0, audioCtx.currentTime);
-          }
-        }
-      }
-    }
-
     function updateDayNightCycle(deltaTime) {
       dayNightTimer += deltaTime;
 
@@ -1127,11 +1086,15 @@
         dayNightTimer = 0;
         isNight = !isNight;
 
+        const bgAudio = document.getElementById('bg-music');
+
         if (isNight) {
+          if (bgAudio) bgAudio.pause();
           skySphereMesh.material.map = nightSkyTexture;
           skySphereMesh.material.needsUpdate = true;
+          scene.fog.color.setHex(0x050515);
           scene.fog.density = 0.012;
-          ambientLight.color.copy(baseNightColor);
+          ambientLight.color.setHex(0x222244);
           ambientLight.intensity = 0.2;
           sunLight.intensity = 0.1;
           flashlight.visible = true;
@@ -1139,11 +1102,13 @@
           spawnEyeMonsters(5 + Math.min(10, daysSurvived * 2));
           triggerHaptic('both', 0.8, 300);
         } else {
+          if (bgAudio) bgAudio.play().catch(e => console.log("Audio play blocked:", e));
           daysSurvived++;
           skySphereMesh.material.map = daySkyTexture;
           skySphereMesh.material.needsUpdate = true;
+          scene.fog.color.setHex(0xaaccff);
           scene.fog.density = 0.005;
-          ambientLight.color.copy(baseDayColor);
+          ambientLight.color.setHex(0xddeeff);
           ambientLight.intensity = 0.6;
           sunLight.intensity = 1.5;
           flashlight.visible = false;
@@ -1206,6 +1171,7 @@
             spawnCrystalsAt(eye.position, 5);
             scene.remove(eye);
             eyeMonsters.splice(i, 1);
+            checkActiveChasers();
           }
         } else {
           const dirToPlayer = new THREE.Vector3().subVectors(playerPos, eye.position);
@@ -1220,6 +1186,8 @@
               if (eye.userData.state === 'scatter') {
                 if (distToPlayer < eye.userData.detectionRadius) {
                   eye.userData.state = 'chase';
+                  eye.userData.isChasing = true;
+                  playMonsterChaseSound();
                 } else {
                   const wanderMove = eye.userData.wanderDir.clone().multiplyScalar(eye.userData.speed * 0.5);
                   const nextMonsterPos = eye.position.clone().add(wanderMove);
@@ -1237,7 +1205,7 @@
                 const nextMonsterPos = eye.position.clone().addScaledVector(dirToPlayer, eye.userData.speed);
                 if (!checkCollision(nextMonsterPos.x, nextMonsterPos.z)) {
                   eye.position.copy(nextMonsterPos);
-                  eye.position.y = getTerrainHeight(eye.position.x, eye.position.z) + 2.5;
+                  eye.position.y = getTerrainHeight(cookieMonsterPos.x, cookieMonsterPos.z) + 2.5;
                 }
               }
             }
@@ -1254,6 +1222,7 @@
           spawnCrystalsAt(cookie.position, 5);
           scene.remove(cookie);
           cookieMonsters.splice(i, 1);
+          checkActiveChasers();
           playSound(260, 'sawtooth', 0.15);
           triggerHaptic('right', 0.9, 120);
         } else {
@@ -1329,13 +1298,20 @@
     }
 
     function playSound(freq, type, duration) {
-      initWebAudio();
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
       if (audioCtx.state === 'suspended') audioCtx.resume();
 
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.type = type;
-      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+
+      // Apply low sanity pitch shift to sound effects
+      const insanityFactor = Math.max(0, (50 - sanity) / 50);
+      const pitchMod = 1.0 - (insanityFactor * 0.4);
+
+      osc.frequency.setValueAtTime(freq * pitchMod, audioCtx.currentTime);
       gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
       osc.connect(gain);
@@ -1352,9 +1328,9 @@
     }
 
     function onEnterVR() {
-      initWebAudio();
+      setupAudioNodes();
       const bgAudio = document.getElementById('bg-music');
-      if (bgAudio) {
+      if (bgAudio && !isNight) {
         bgAudio.play().catch(e => console.log("Audio play blocked:", e));
       }
 
@@ -1386,7 +1362,6 @@
     let lastClockTime = performance.now();
 
     function render(timestamp) {
-      const time = timestamp * 0.001;
       const now = performance.now();
       const deltaTime = (now - lastClockTime) / 1000;
       lastClockTime = now;
@@ -1394,7 +1369,48 @@
       processThumbstickLocomotion();
       updateDayNightCycle(deltaTime);
       updateCombatAndInteractions();
-      applySanityVisualAndAudioEffects(time);
+
+      // Dynamic Low Sanity Visual Distortion & Color Shifting
+      const insanityFactor = Math.max(0, (50 - sanity) / 50);
+
+      if (insanityFactor > 0) {
+        const time = now * 0.003;
+
+        // Trippy camera tilt and FOV distortion
+        camera.rotation.z = Math.sin(time * 2.5) * 0.15 * insanityFactor;
+        camera.fov = 75 + Math.sin(time * 3.0) * 12 * insanityFactor;
+        camera.updateProjectionMatrix();
+
+        // Shifting scene fog color through trippy hue rotation
+        const hue = (time * 0.2) % 1;
+        const color = new THREE.Color().setHSL(hue, 0.9, 0.3);
+        scene.fog.color.copy(color);
+
+        // Trippy light intensity fluctuations
+        ambientLight.color.setHSL((hue + 0.5) % 1, 0.8, 0.4);
+        ambientLight.intensity = (isNight ? 0.2 : 0.6) + Math.sin(time * 5.0) * 0.3 * insanityFactor;
+
+        // Audio distortion / pitch slowdown when sanity is low
+        const bgAudio = document.getElementById('bg-music');
+        if (bgAudio) {
+          bgAudio.playbackRate = Math.max(0.4, 1.0 - insanityFactor * 0.5 + Math.sin(time * 2) * 0.1 * insanityFactor);
+        }
+        const screamAudio = document.getElementById('monster-scream');
+        if (screamAudio) {
+          screamAudio.playbackRate = Math.max(0.4, 1.0 - insanityFactor * 0.4);
+        }
+      } else {
+        // Reset camera and visuals when sanity is normal
+        if (camera.rotation.z !== 0) camera.rotation.z = 0;
+        if (camera.fov !== 75) {
+          camera.fov = 75;
+          camera.updateProjectionMatrix();
+        }
+        const bgAudio = document.getElementById('bg-music');
+        if (bgAudio && bgAudio.playbackRate !== 1.0) bgAudio.playbackRate = 1.0;
+        const screamAudio = document.getElementById('monster-scream');
+        if (screamAudio && screamAudio.playbackRate !== 1.0) screamAudio.playbackRate = 1.0;
+      }
 
       if (skySphereMesh) {
         skySphereMesh.position.copy(cameraGroup.position);
