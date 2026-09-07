@@ -67,7 +67,7 @@
   <audio id="monster-scream" src="https://www.image2url.com/r2/default/audio/1788749739268-96f59017-2cba-4e49-85bb-0fbd98ff2fde.mp3" loop preload="auto"></audio>
 
   <button id="vr-button">ENTER REALISTIC VR SURVIVAL</button>
-  <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | SANITY: 100 | CRYSTALS: 0 | DAY 1</div>
+  <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | SANITY: 100 | CRYSTALS: 0 | AMMO: 0 | DAY 1</div>
   <div id="damage-overlay"></div>
 
   <script>
@@ -93,6 +93,10 @@
     // Wrist Watch HUD & Equipment
     let watchGroup, watchCanvas, watchCtx, watchTexture;
     let swordMesh;
+    let gunMesh = null;
+    let hasGun = false;
+    let ammoCount = 0;
+    let canShoot = true;
     let prevSwordPos = new THREE.Vector3();
     let swordVelocity = 0;
 
@@ -110,6 +114,7 @@
     let cookieMonsters = [];
     let foodApples = [];
     let dreamCrystals = [];
+    let groundGuns = [];
     let audioCtx = null;
     let cookieTexture = null;
 
@@ -125,7 +130,6 @@
     let canUseCrystal = true;
     const PLAYER_RADIUS = 0.4;
 
-    // Math Noise functions
     function MathNoise(x, z) {
       const p = (x * 12.9898 + z * 78.233);
       return (Math.sin(p) * 43758.5453) % 1;
@@ -235,7 +239,6 @@
 
       document.body.appendChild(renderer.domElement);
 
-      // Lighting Setup
       ambientLight = new THREE.AmbientLight(0xddeeff, 0.6);
       scene.add(ambientLight);
 
@@ -285,6 +288,12 @@
       speedUpgradeLevel = 0;
       speedBoostTimer = 0;
       isGameOver = false;
+      hasGun = false;
+      ammoCount = 0;
+
+      if (gunMesh) {
+        gunMesh.visible = false;
+      }
       
       stopMonsterChaseSound();
       clearCookieMonsters();
@@ -296,7 +305,6 @@
 
       updateChunks(true);
 
-      // Unstuck resolution logic
       let offsetAngle = 0;
       let offsetRadius = 1.0;
       while (checkCollision(cameraGroup.position.x, cameraGroup.position.z)) {
@@ -417,6 +425,30 @@
       return chunkGroup;
     }
 
+    function createGunModel() {
+      const group = new THREE.Group();
+      const metalMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9, roughness: 0.2 });
+      const woodMat = new THREE.MeshStandardMaterial({ color: 0x4a2a11, roughness: 0.7 });
+
+      const barrelGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.6, 16);
+      const barrel = new THREE.Mesh(barrelGeo, metalMat);
+      barrel.rotation.x = Math.PI / 2;
+      barrel.position.set(0, 0, -0.25);
+      group.add(barrel);
+
+      const stockGeo = new THREE.BoxGeometry(0.04, 0.08, 0.25);
+      const stock = new THREE.Mesh(stockGeo, woodMat);
+      stock.position.set(0, -0.02, 0.08);
+      group.add(stock);
+
+      const bodyGeo = new THREE.BoxGeometry(0.045, 0.06, 0.2);
+      const body = new THREE.Mesh(bodyGeo, metalMat);
+      body.position.set(0, 0, -0.05);
+      group.add(body);
+
+      return group;
+    }
+
     function populateChunkElements(group, offsetX, offsetZ) {
       const pseudoRandom = (x, z) => {
         return (Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
@@ -465,7 +497,6 @@
         houseGroup.add(frontWallLeft);
 
         const frontWallRight = new THREE.Mesh(new THREE.BoxGeometry(2.2, wallHeight, wallThickness), houseMat);
-        frontWallRight.position.set(2.4, wallHeight / 2, wallThickness), houseMat;
         frontWallRight.position.set(2.4, wallHeight / 2, houseWidth / 2);
         frontWallRight.castShadow = true; frontWallRight.receiveShadow = true;
         houseGroup.add(frontWallRight);
@@ -476,6 +507,15 @@
         roof.rotation.y = Math.PI / 4;
         roof.castShadow = true;
         houseGroup.add(roof);
+
+        // Rare Firearm Loot Spawn inside the House (~25% chance per house)
+        if (Math.abs(pseudoRandom(hX * 2, hZ * 2)) > 0.75) {
+          const gunLoot = createGunModel();
+          gunLoot.position.set(hX, hY + 0.6, hZ);
+          gunLoot.rotation.y = Math.random() * Math.PI * 2;
+          group.add(gunLoot);
+          groundGuns.push({ mesh: gunLoot, group: group, x: hX, z: hZ });
+        }
 
         houseGroup.position.set(hX, hY, hZ);
         group.add(houseGroup);
@@ -549,6 +589,7 @@
 
     function disposeGroup(group) {
       colliders = colliders.filter(c => c.group !== group);
+      groundGuns = groundGuns.filter(g => g.group !== group);
 
       group.traverse(child => {
         if (child.isMesh) {
@@ -677,7 +718,7 @@
 
       watchCtx.fillStyle = '#00ffff';
       watchCtx.font = 'bold 14px sans-serif';
-      watchCtx.fillText(`CRYSTALS: ${crystalsCollected}`, 128, 148);
+      watchCtx.fillText(`CRYSTALS: ${crystalsCollected} | AMMO: ${hasGun ? ammoCount : 'NO GUN'}`, 128, 148);
 
       watchCtx.fillStyle = '#ffff00';
       watchCtx.font = 'bold 12px sans-serif';
@@ -686,7 +727,7 @@
       const playerSafe = isInsideSafeZone(cameraGroup.position.x, cameraGroup.position.z);
       watchCtx.fillStyle = playerSafe ? '#00ffcc' : (isNight ? '#ff3333' : '#33ff33');
       watchCtx.font = 'bold 12px sans-serif';
-      watchCtx.fillText(playerSafe ? 'SAFE ZONE' : (isNight ? 'NIGHT: EYE SWARM' : 'A-BTN: HEAL/SPEED BOOST'), 128, 205);
+      watchCtx.fillText(playerSafe ? 'SAFE ZONE' : (hasGun ? 'TRIGGER: SHOOT GUN' : 'A-BTN: HEAL/SPEED BOOST'), 128, 205);
 
       if (watchTexture) watchTexture.needsUpdate = true;
     }
@@ -717,6 +758,55 @@
       grip2.add(swordMesh);
       swordMesh.position.set(0, 0, -0.05);
       swordMesh.rotation.set(-Math.PI / 4, 0, 0);
+
+      gunMesh = createGunModel();
+      grip2.add(gunMesh);
+      gunMesh.position.set(0, 0, -0.1);
+      gunMesh.rotation.set(0, 0, 0);
+      gunMesh.visible = false;
+    }
+
+    function shootFirearm() {
+      if (!hasGun || ammoCount <= 0 || !canShoot) return;
+
+      ammoCount--;
+      canShoot = false;
+      setTimeout(() => { canShoot = true; }, 400);
+
+      playSound(120, 'sawtooth', 0.2);
+      triggerHaptic('right', 1.0, 150);
+
+      const shootRay = new THREE.Raycaster();
+      const gunWorldPos = new THREE.Vector3();
+      const gunWorldDir = new THREE.Vector3(0, 0, -1);
+      
+      gunMesh.getWorldPosition(gunWorldPos);
+      gunWorldDir.applyQuaternion(gunMesh.getWorldQuaternion(new THREE.Quaternion()));
+
+      shootRay.set(gunWorldPos, gunWorldDir);
+
+      for (let i = eyeMonsters.length - 1; i >= 0; i--) {
+        const eye = eyeMonsters[i];
+        if (eye.position.distanceTo(gunWorldPos) < 35.0) {
+          eye.userData.hp -= 10;
+          if (eye.userData.hp <= 0) {
+            spawnCrystalsAt(eye.position, 5);
+            scene.remove(eye);
+            eyeMonsters.splice(i, 1);
+            checkActiveChasers();
+          }
+        }
+      }
+
+      for (let i = cookieMonsters.length - 1; i >= 0; i--) {
+        const cookie = cookieMonsters[i];
+        if (cookie.position.distanceTo(gunWorldPos) < 35.0) {
+          spawnCrystalsAt(cookie.position, 5);
+          scene.remove(cookie);
+          cookieMonsters.splice(i, 1);
+          checkActiveChasers();
+        }
+      }
     }
 
     function spawnEyeMonsters(count) {
@@ -872,6 +962,11 @@
           canUseCrystal = true;
         }
 
+        const triggerPressed = buttons[0] && buttons[0].pressed;
+        if (source.handedness === 'right' && triggerPressed) {
+          shootFirearm();
+        }
+
         const xAxis = axes[2] !== undefined ? axes[2] : axes[0];
         const yAxis = axes[3] !== undefined ? axes[3] : axes[1];
 
@@ -932,7 +1027,6 @@
         health = Math.max(0, health - deltaTime * 2.5);
       }
 
-      // Sanity Mechanics
       const playerPos = cameraGroup.position.clone();
       const playerSafe = isInsideSafeZone(playerPos.x, playerPos.z);
       
@@ -1009,12 +1103,29 @@
       const playerPos = cameraGroup.position.clone();
       const playerSafe = isInsideSafeZone(playerPos.x, playerPos.z);
 
+      // Pickup Ground Guns
+      for (let i = groundGuns.length - 1; i >= 0; i--) {
+        const gunItem = groundGuns[i];
+        if (playerPos.distanceTo(new THREE.Vector3(gunItem.x, playerPos.y, gunItem.z)) < 2.0) {
+          hasGun = true;
+          ammoCount += 12;
+          if (swordMesh) swordMesh.visible = false;
+          if (gunMesh) gunMesh.visible = true;
+          
+          playSound(750, 'square', 0.2);
+          triggerHaptic('right', 0.8, 200);
+
+          gunItem.group.remove(gunItem.mesh);
+          groundGuns.splice(i, 1);
+        }
+      }
+
       // Eye Monsters Combat
       for (let i = eyeMonsters.length - 1; i >= 0; i--) {
         const eye = eyeMonsters[i];
         const distToSword = currSwordWorldPos.distanceTo(eye.position);
 
-        if (distToSword < 2.2 && swordVelocity > 0.035) {
+        if (distToSword < 2.2 && swordVelocity > 0.035 && !hasGun) {
           eye.userData.hp -= 1 * damageMultiplier;
           playSound(260, 'sawtooth', 0.15);
           triggerHaptic('right', 0.9, 120);
@@ -1073,7 +1184,7 @@
         const cookie = cookieMonsters[i];
         const distToSword = currSwordWorldPos.distanceTo(cookie.position);
 
-        if (distToSword < 2.2 && swordVelocity > 0.035) {
+        if (distToSword < 2.2 && swordVelocity > 0.035 && !hasGun) {
           spawnCrystalsAt(cookie.position, 5);
           scene.remove(cookie);
           cookieMonsters.splice(i, 1);
@@ -1173,7 +1284,7 @@
     function update2DUI() {
       const ui = document.getElementById('objective-ui');
       const playerSafe = isInsideSafeZone(cameraGroup.position.x, cameraGroup.position.z);
-      ui.innerText = `HEALTH: ${Math.round(health)} | HUNGER: ${Math.round(hunger)} | SANITY: ${Math.round(sanity)} | CRYSTALS: ${crystalsCollected} (A-Btn: Consume) | DAY ${daysSurvived}`;
+      ui.innerText = `HEALTH: ${Math.round(health)} | HUNGER: ${Math.round(hunger)} | SANITY: ${Math.round(sanity)} | CRYSTALS: ${crystalsCollected} | AMMO: ${hasGun ? ammoCount : 0} | DAY ${daysSurvived}`;
       ui.style.color = playerSafe ? '#00ffcc' : (isNight ? '#ff4444' : '#00ffff');
     }
 
@@ -1227,6 +1338,10 @@
       dreamCrystals.forEach(c => {
         c.mesh.rotation.y += 0.025;
         c.mesh.position.y += Math.sin(now * 0.003) * 0.0015;
+      });
+
+      groundGuns.forEach(g => {
+        g.mesh.rotation.y += 0.01;
       });
 
       foodApples.forEach(a => a.mesh.rotation.y += 0.015);
