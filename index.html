@@ -64,7 +64,7 @@
 
   <!-- Audio Elements -->
   <audio id="bg-music" src="https://www.image2url.com/r2/default/audio/1788736134916-726630de-e91a-4478-a281-4413564358c7.mp3" loop autoplay></audio>
-  <audio id="monster-scream" src="https://www.image2url.com/r2/default/audio/1788749739268-96f59017-2cba-4e49-85bb-0fbd98ff2fde.mp3" preload="auto"></audio>
+  <audio id="monster-scream" src="https://www.image2url.com/r2/default/audio/1788749739268-96f59017-2cba-4e49-85bb-0fbd98ff2fde.mp3" loop preload="auto"></audio>
 
   <button id="vr-button">ENTER REALISTIC VR SURVIVAL</button>
   <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | SANITY: 100 | CRYSTALS: 0 | DAY 1</div>
@@ -170,8 +170,44 @@
     function playMonsterChaseSound() {
       const screamAudio = document.getElementById('monster-scream');
       if (screamAudio) {
+        if (screamAudio.paused) {
+          screamAudio.currentTime = 0;
+          screamAudio.play().catch(e => console.log("Audio play blocked:", e));
+        }
+      }
+    }
+
+    function stopMonsterChaseSound() {
+      const screamAudio = document.getElementById('monster-scream');
+      if (screamAudio) {
+        screamAudio.pause();
         screamAudio.currentTime = 0;
-        screamAudio.play().catch(e => console.log("Audio play blocked:", e));
+      }
+    }
+
+    function checkActiveChasers() {
+      let activeChaserExists = eyeMonsters.some(e => e.userData.isChasing) || cookieMonsters.some(c => c.userData.isChasing);
+      if (!activeChaserExists) {
+        stopMonsterChaseSound();
+      }
+    }
+
+    function spawnCrystalsAt(position, count = 5) {
+      const crystalGeo = new THREE.OctahedronGeometry(0.45, 0);
+      const crystalMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00aaaa, emissiveIntensity: 0.6, roughness: 0.1 });
+
+      for (let i = 0; i < count; i++) {
+        const crystal = new THREE.Mesh(crystalGeo, crystalMat);
+        const angle = (i / count) * Math.PI * 2 + (Math.random() * 0.5);
+        const dist = 0.8 + Math.random() * 1.2;
+
+        const cX = position.x + Math.cos(angle) * dist;
+        const cZ = position.z + Math.sin(angle) * dist;
+        const cY = getTerrainHeight(cX, cZ) + 0.8;
+
+        crystal.position.set(cX, cY, cZ);
+        scene.add(crystal);
+        dreamCrystals.push({ mesh: crystal, group: scene });
       }
     }
 
@@ -250,6 +286,7 @@
       speedBoostTimer = 0;
       isGameOver = false;
       
+      stopMonsterChaseSound();
       clearCookieMonsters();
       
       let spawnX = 0;
@@ -428,6 +465,7 @@
         houseGroup.add(frontWallLeft);
 
         const frontWallRight = new THREE.Mesh(new THREE.BoxGeometry(2.2, wallHeight, wallThickness), houseMat);
+        frontWallRight.position.set(2.4, wallHeight / 2, wallThickness), houseMat;
         frontWallRight.position.set(2.4, wallHeight / 2, houseWidth / 2);
         frontWallRight.castShadow = true; frontWallRight.receiveShadow = true;
         houseGroup.add(frontWallRight);
@@ -712,7 +750,7 @@
           state: 'scatter',
           wanderDir: wanderDir,
           detectionRadius: 28 + Math.random() * 10,
-          hasChased: false
+          isChasing: false
         };
         scene.add(eye);
         eyeMonsters.push(eye);
@@ -737,7 +775,8 @@
 
       cookie.userData = {
         speed: 0.085,
-        damage: 1.2
+        damage: 1.2,
+        isChasing: true
       };
 
       scene.add(cookie);
@@ -749,11 +788,13 @@
     function clearEyeMonsters() {
       eyeMonsters.forEach(eye => scene.remove(eye));
       eyeMonsters = [];
+      checkActiveChasers();
     }
 
     function clearCookieMonsters() {
       cookieMonsters.forEach(c => scene.remove(c));
       cookieMonsters = [];
+      checkActiveChasers();
     }
 
     function setupControllers() {
@@ -982,8 +1023,10 @@
           eye.position.addScaledVector(pushDir, 3.5);
 
           if (eye.userData.hp <= 0) {
+            spawnCrystalsAt(eye.position, 5);
             scene.remove(eye);
             eyeMonsters.splice(i, 1);
+            checkActiveChasers();
           }
         } else {
           const dirToPlayer = new THREE.Vector3().subVectors(playerPos, eye.position);
@@ -998,10 +1041,8 @@
               if (eye.userData.state === 'scatter') {
                 if (distToPlayer < eye.userData.detectionRadius) {
                   eye.userData.state = 'chase';
-                  if (!eye.userData.hasChased) {
-                    playMonsterChaseSound();
-                    eye.userData.hasChased = true;
-                  }
+                  eye.userData.isChasing = true;
+                  playMonsterChaseSound();
                 } else {
                   const wanderMove = eye.userData.wanderDir.clone().multiplyScalar(eye.userData.speed * 0.5);
                   const nextMonsterPos = eye.position.clone().add(wanderMove);
@@ -1027,23 +1068,34 @@
         }
       }
 
-      // Cookie Monster
+      // Cookie Monster Combat & Behavior
       for (let i = cookieMonsters.length - 1; i >= 0; i--) {
         const cookie = cookieMonsters[i];
-        const dirToPlayer = new THREE.Vector3().subVectors(playerPos, cookie.position);
-        const distToPlayer = dirToPlayer.length();
+        const distToSword = currSwordWorldPos.distanceTo(cookie.position);
 
-        if (!playerSafe) {
-          if (distToPlayer <= 1.5) {
-            health = Math.max(0, health - cookie.userData.damage);
-            triggerDamageFlash();
-            triggerHaptic('both', 0.8, 100);
-          } else {
-            dirToPlayer.normalize();
-            const nextMonsterPos = cookie.position.clone().addScaledVector(dirToPlayer, cookie.userData.speed);
-            if (!checkCollision(nextMonsterPos.x, nextMonsterPos.z)) {
-              cookie.position.copy(nextMonsterPos);
-              cookie.position.y = getTerrainHeight(cookie.position.x, cookie.position.z) + 2.0;
+        if (distToSword < 2.2 && swordVelocity > 0.035) {
+          spawnCrystalsAt(cookie.position, 5);
+          scene.remove(cookie);
+          cookieMonsters.splice(i, 1);
+          checkActiveChasers();
+          playSound(260, 'sawtooth', 0.15);
+          triggerHaptic('right', 0.9, 120);
+        } else {
+          const dirToPlayer = new THREE.Vector3().subVectors(playerPos, cookie.position);
+          const distToPlayer = dirToPlayer.length();
+
+          if (!playerSafe) {
+            if (distToPlayer <= 1.5) {
+              health = Math.max(0, health - cookie.userData.damage);
+              triggerDamageFlash();
+              triggerHaptic('both', 0.8, 100);
+            } else {
+              dirToPlayer.normalize();
+              const nextMonsterPos = cookie.position.clone().addScaledVector(dirToPlayer, cookie.userData.speed);
+              if (!checkCollision(nextMonsterPos.x, nextMonsterPos.z)) {
+                cookie.position.copy(nextMonsterPos);
+                cookie.position.y = getTerrainHeight(cookie.position.x, cookie.position.z) + 2.0;
+              }
             }
           }
         }
@@ -1074,7 +1126,11 @@
           crystalsCollected++;
           playSound(880, 'triangle', 0.25);
           triggerHaptic('both', 0.6, 150);
-          item.group.remove(item.mesh);
+          if (item.group && item.group.remove) {
+            item.group.remove(item.mesh);
+          } else {
+            scene.remove(item.mesh);
+          }
           dreamCrystals.splice(i, 1);
         }
       }
