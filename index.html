@@ -850,15 +850,7 @@
         }
       }
 
-      for (let i = cookieMonsters.length - 1; i >= 0; i--) {
-        const cookie = cookieMonsters[i];
-        if (cookie.position.distanceTo(gunWorldPos) < 35.0) {
-          spawnCrystalsAt(cookie.position, 5);
-          scene.remove(cookie);
-          cookieMonsters.splice(i, 1);
-          checkActiveChasers();
-        }
-      }
+      // REMOVED: Gun shooting logic no longer damages Cookie Monsters (they are now invincible)
     }
 
     function spawnEyeMonsters(count) {
@@ -875,10 +867,9 @@
 
         const ex = playerPos.x + Math.cos(angle) * dist;
         const ez = playerPos.z + Math.sin(angle) * dist;
-        const ey = getTerrainHeight(ex, ez) + 4.5; // Offset higher to accommodate larger size
+        const ey = getTerrainHeight(ex, ez) + 4.5;
 
         eye.position.set(ex, ey, ez);
-        // INCREASED SIZE: Scaled up from (4.5, 4.5) to (9.0, 9.0)
         eye.scale.set(9.0, 9.0, 1);
         
         const wanderDir = new THREE.Vector3(
@@ -889,7 +880,6 @@
 
         eye.userData = { 
           hp: 3 + Math.floor(daysSurvived * 0.5), 
-          // INCREASED SPEED: Boosted speed parameters
           speed: 0.15 + Math.random() * 0.05,
           state: 'scatter',
           wanderDir: wanderDir,
@@ -912,14 +902,12 @@
 
       const cx = playerPos.x + Math.cos(angle) * dist;
       const cz = playerPos.z + Math.sin(angle) * dist;
-      const cy = getTerrainHeight(cx, cz) + 4.0; // Offset higher for massive scale
+      const cy = getTerrainHeight(cx, cz) + 4.0;
 
       cookie.position.set(cx, cy, cz);
-      // INCREASED SIZE: Scaled up from (3.5, 3.5) to (8.0, 8.0)
       cookie.scale.set(8.0, 8.0, 1);
 
       cookie.userData = {
-        // INCREASED SPEED: Boosted from 0.085 to 0.18
         speed: 0.18,
         damage: 1.2,
         isChasing: true
@@ -1236,33 +1224,23 @@
         }
       }
 
+      // INVINCIBLE COOKIE MONSTER: Player attacks do not damage or destroy it anymore
       for (let i = cookieMonsters.length - 1; i >= 0; i--) {
         const cookie = cookieMonsters[i];
-        const distToSword = currSwordWorldPos.distanceTo(cookie.position);
+        const dirToPlayer = new THREE.Vector3().subVectors(playerPos, cookie.position);
+        const distToPlayer = dirToPlayer.length();
 
-        if (distToSword < 3.2 && swordVelocity > 0.035 && !hasGun) {
-          spawnCrystalsAt(cookie.position, 5);
-          scene.remove(cookie);
-          cookieMonsters.splice(i, 1);
-          checkActiveChasers();
-          playSound(260, 'sawtooth', 0.15);
-          triggerHaptic('right', 0.9, 120);
-        } else {
-          const dirToPlayer = new THREE.Vector3().subVectors(playerPos, cookie.position);
-          const distToPlayer = dirToPlayer.length();
-
-          if (!playerSafe) {
-            if (distToPlayer <= 2.5) {
-              health = Math.max(0, health - cookie.userData.damage);
-              triggerDamageFlash();
-              triggerHaptic('both', 0.8, 100);
-            } else {
-              dirToPlayer.normalize();
-              const nextMonsterPos = cookie.position.clone().addScaledVector(dirToPlayer, cookie.userData.speed);
-              if (!checkCollision(nextMonsterPos.x, nextMonsterPos.z)) {
-                cookie.position.copy(nextMonsterPos);
-                cookie.position.y = getTerrainHeight(cookie.position.x, cookie.position.z) + 4.0;
-              }
+        if (!playerSafe) {
+          if (distToPlayer <= 2.5) {
+            health = Math.max(0, health - cookie.userData.damage);
+            triggerDamageFlash();
+            triggerHaptic('both', 0.8, 100);
+          } else {
+            dirToPlayer.normalize();
+            const nextMonsterPos = cookie.position.clone().addScaledVector(dirToPlayer, cookie.userData.speed);
+            if (!checkCollision(nextMonsterPos.x, nextMonsterPos.z)) {
+              cookie.position.copy(nextMonsterPos);
+              cookie.position.y = getTerrainHeight(cookie.position.x, cookie.position.z) + 4.0;
             }
           }
         }
