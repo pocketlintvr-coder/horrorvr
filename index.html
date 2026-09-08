@@ -63,9 +63,9 @@
 <body>
 
   <!-- Audio Elements -->
-  <audio id="bg-music" src="https://www.image2url.com/r2/default/audio/1788736134916-726630de-e91a-4478-a281-4413564358c7.mp3" loop autoplay></audio>
-  <audio id="night-music" src="https://www.image2url.com/r2/default/audio/1788820777881-88761674-947b-4b5a-a927-d4703de64eb3.mp3" loop preload="auto"></audio>
-  <audio id="monster-scream" src="https://www.image2url.com/r2/default/audio/1788749739268-96f59017-2cba-4e49-85bb-0fbd98ff2fde.mp3" loop preload="auto"></audio>
+  <audio id="bg-music" src="https://www.image2url.com/r2/default/audio/1788736134916-726630de-e91a-4478-a281-4413564358c7.mp3" loop autoplay crossorigin="anonymous"></audio>
+  <audio id="night-music" src="https://www.image2url.com/r2/default/audio/1788820777881-88761674-947b-4b5a-a927-d4703de64eb3.mp3" loop preload="auto" crossorigin="anonymous"></audio>
+  <audio id="monster-scream" src="https://www.image2url.com/r2/default/audio/1788749739268-96f59017-2cba-4e49-85bb-0fbd98ff2fde.mp3" loop preload="auto" crossorigin="anonymous"></audio>
 
   <button id="vr-button">ENTER REALISTIC VR SURVIVAL</button>
   <div id="objective-ui">HEALTH: 100 | HUNGER: 100 | SANITY: 100 | CRYSTALS: 0 | AMMO: 0 | DAY 1</div>
@@ -76,7 +76,7 @@
     let ambientLight, sunLight, flashlight;
     let skySphereMesh, daySkyTexture, nightSkyTexture, customGrassTexture;
 
-    // VR Sanity Shader Overlay
+    // VR-compatible Sanity Shader Overlay
     let sanityOverlayMesh, sanityMaterial;
 
     // Game Stats
@@ -88,14 +88,13 @@
     let isNight = false;
     let dayNightTimer = 0;
     let isGameOver = false;
-    let houseStayTimer = 0;
 
     // Upgrades System
     let damageMultiplier = 1;
     let speedUpgradeLevel = 0;
     let speedBoostTimer = 0;
 
-    // Web Audio Buffer
+    // Web Audio Buffer for Night Loop
     let nightAudioBuffer = null;
     let nightSourceNode = null;
     let nightGainNode = null;
@@ -148,7 +147,7 @@
     function SmoothNoise(x, z) {
       const corners = (MathNoise(x-1, z-1) + MathNoise(x+1, z-1) + MathNoise(x-1, z+1) + MathNoise(x+1, z+1)) / 16;
       const sides = (MathNoise(x-1, z) + MathNoise(x+1, z-1) + MathNoise(x-1, z) + MathNoise(x, z+1)) / 8;
-      const center = MathNoise(x) / 4;
+      const center = MathNoise(x, z) / 4;
       return corners + sides + center;
     }
 
@@ -183,9 +182,11 @@
 
     function playMonsterChaseSound() {
       const screamAudio = document.getElementById('monster-scream');
-      if (screamAudio && screamAudio.paused) {
-        screamAudio.currentTime = 0;
-        screamAudio.play().catch(e => console.log("Audio blocked:", e));
+      if (screamAudio) {
+        if (screamAudio.paused) {
+          screamAudio.currentTime = 0;
+          screamAudio.play().catch(e => console.log("Audio play blocked:", e));
+        }
       }
     }
 
@@ -224,24 +225,34 @@
     }
 
     function preloadNightAudioBuffer() {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      fetch("https://www.image2url.com/r2/default/audio/1788820777881-88761674-947b-4b5a-a927-d4703de64eb3.mp3")
-        .then(res => res.arrayBuffer())
-        .then(data => audioCtx.decodeAudioData(data))
-        .then(buffer => { nightAudioBuffer = buffer; })
-        .catch(err => console.log("Audio decode error:", err));
+      try {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        fetch("https://www.image2url.com/r2/default/audio/1788820777881-88761674-947b-4b5a-a927-d4703de64eb3.mp3")
+          .then(res => res.arrayBuffer())
+          .then(data => audioCtx.decodeAudioData(data))
+          .then(buffer => {
+            nightAudioBuffer = buffer;
+          })
+          .catch(err => console.warn("Audio buffer fetch prevented by CORS or connection issue. Fallback to HTML5 audio.", err));
+      } catch (e) {
+        console.warn("WebAudio initialization warning:", e);
+      }
     }
 
     function playSeamlessNightLoop() {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
 
       if (nightSourceNode) {
         try { nightSourceNode.stop(); } catch(e){}
       }
 
       const nightAudioElem = document.getElementById('night-music');
-      if (nightAudioBuffer) {
+      if (nightAudioBuffer && audioCtx) {
         if (nightAudioElem) nightAudioElem.pause();
         nightSourceNode = audioCtx.createBufferSource();
         nightSourceNode.buffer = nightAudioBuffer;
@@ -252,10 +263,11 @@
         
         nightSourceNode.connect(nightGainNode);
         nightGainNode.connect(audioCtx.destination);
+        
         nightSourceNode.start(0);
       } else if (nightAudioElem) {
         nightAudioElem.currentTime = 0;
-        nightAudioElem.play().catch(e => console.log("Audio blocked:", e));
+        nightAudioElem.play().catch(e => console.log("Audio play blocked:", e));
       }
     }
 
@@ -265,7 +277,9 @@
         nightSourceNode = null;
       }
       const nightAudioElem = document.getElementById('night-music');
-      if (nightAudioElem) nightAudioElem.pause();
+      if (nightAudioElem) {
+        nightAudioElem.pause();
+      }
     }
 
     init();
@@ -277,7 +291,7 @@
       cameraGroup = new THREE.Group();
       scene.add(cameraGroup);
 
-      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.01, 1000);
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
       cameraGroup.add(camera);
 
       renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
@@ -286,12 +300,13 @@
       renderer.xr.enabled = true;
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.0;
 
       document.body.appendChild(renderer.domElement);
 
-      // WebXR Compatible Screen-Space Sanity Vignette
+      // Sanity Overlay Shader Mesh for WebXR VR tracking
       sanityMaterial = new THREE.ShaderMaterial({
         uniforms: {
           uSanity: { value: 1.0 },
@@ -313,24 +328,22 @@
           varying vec2 vUv;
 
           void main() {
-            float sanityFactor = 1.0 - smoothstep(0.0, 0.7, uSanity);
+            float sanityFactor = 1.0 - smoothstep(0.0, 0.65, uSanity);
             vec2 uvCentered = (vUv - 0.5) * 2.0;
             
             float dist = length(uvCentered);
-            float vignette = smoothstep(0.2, 1.1, dist) * sanityFactor * 0.9;
-            float pulse = (sin(uTime * 5.0) * 0.2 + 0.8) * sanityFactor;
+            float vignette = smoothstep(0.3, 1.2, dist) * sanityFactor * 0.85;
+            float pulse = (sin(uTime * 4.0) * 0.15 + 0.85) * sanityFactor;
             
-            vec3 effectColor = mix(vec3(0.5, 0.0, 0.4), vec3(0.8, 0.0, 0.0), sin(uTime * 2.0) * 0.5 + 0.5);
-            gl_FragColor = vec4(effectColor, vignette * pulse);
+            vec3 darkPurpleTint = vec3(0.5, 0.05, 0.45);
+            gl_FragColor = vec4(darkPurpleTint, vignette * pulse);
           }
         `
       });
 
-      // Scale to cover field of view inside VR lenses
-      sanityOverlayMesh = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 2.0), sanityMaterial);
-      sanityOverlayMesh.position.set(0, 0, -0.15);
-      sanityOverlayMesh.renderOrder = 9999;
-      camera.add(sanityOverlayMesh);
+      sanityOverlayMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8), sanityMaterial);
+      sanityOverlayMesh.renderOrder = 999;
+      cameraGroup.add(sanityOverlayMesh);
 
       ambientLight = new THREE.AmbientLight(0xddeeff, 0.6);
       scene.add(ambientLight);
@@ -381,13 +394,16 @@
       damageMultiplier = 1;
       speedUpgradeLevel = 0;
       speedBoostTimer = 0;
-      houseStayTimer = 0;
       isGameOver = false;
       hasGun = false;
       ammoCount = 0;
 
-      if (gunMesh) gunMesh.visible = false;
-      if (swordMesh) swordMesh.visible = true;
+      if (gunMesh) {
+        gunMesh.visible = false;
+      }
+      if (swordMesh) {
+        swordMesh.visible = true;
+      }
       
       stopMonsterChaseSound();
       stopSeamlessNightLoop();
@@ -888,6 +904,8 @@
           }
         }
       }
+      
+      // Cookie monster is invincible - bullets do not kill or hurt it
     }
 
     function spawnEyeMonsters(count) {
@@ -944,6 +962,7 @@
       cookie.position.set(cx, cy, cz);
       cookie.scale.set(8.0, 8.0, 1);
 
+      // Invincible Cookie Monster configuration
       cookie.userData = {
         speed: 0.18,
         damage: 1.2,
@@ -1111,17 +1130,11 @@
       const playerPos = cameraGroup.position.clone();
       const playerSafe = isInsideSafeZone(playerPos.x, playerPos.z);
       
-      if (playerSafe) {
-        houseStayTimer += deltaTime;
-        if (houseStayTimer >= 10.0) {
-          sanity = Math.max(0, sanity - deltaTime * 4.5);
-        } else {
-          sanity = Math.min(100, sanity + deltaTime * 2.0);
-        }
+      if (isNight) {
+        sanity = Math.max(0, sanity - deltaTime * 1.5);
       } else {
-        houseStayTimer = 0;
-        if (isNight) {
-          sanity = Math.max(0, sanity - deltaTime * 1.5);
+        if (playerSafe) {
+          sanity = Math.min(100, sanity + deltaTime * 2.0);
         } else {
           sanity = Math.max(0, sanity - deltaTime * 0.3);
         }
@@ -1161,7 +1174,7 @@
           triggerHaptic('both', 0.8, 300);
         } else {
           stopSeamlessNightLoop();
-          if (bgAudio) bgAudio.play().catch(e => console.log("Audio blocked:", e));
+          if (bgAudio) bgAudio.play().catch(e => console.log("Audio play blocked:", e));
           daysSurvived++;
           skySphereMesh.material.map = daySkyTexture;
           skySphereMesh.material.needsUpdate = true;
@@ -1270,6 +1283,7 @@
         }
       }
 
+      // Invincible Cookie Monster Logic
       for (let i = cookieMonsters.length - 1; i >= 0; i--) {
         const cookie = cookieMonsters[i];
         const dirToPlayer = new THREE.Vector3().subVectors(playerPos, cookie.position);
@@ -1343,7 +1357,9 @@
     }
 
     function playSound(freq, type, duration) {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
       if (audioCtx.state === 'suspended') audioCtx.resume();
 
       const osc = audioCtx.createOscillator();
@@ -1368,7 +1384,7 @@
     function onEnterVR() {
       const bgAudio = document.getElementById('bg-music');
       if (bgAudio && !isNight) {
-        bgAudio.play().catch(e => console.log("Audio blocked:", e));
+        bgAudio.play().catch(e => console.log("Audio play blocked:", e));
       }
 
       if (!('xr' in navigator)) {
@@ -1406,6 +1422,23 @@
       processThumbstickLocomotion();
       updateDayNightCycle(deltaTime);
       updateCombatAndInteractions();
+
+      // Safe VR / 2D camera resolution check
+      let targetCam = camera;
+      if (renderer.xr.isPresenting) {
+        const xrCam = renderer.xr.getCamera(camera);
+        if (xrCam) {
+          targetCam = xrCam;
+        }
+      }
+      
+      const camWorldPos = new THREE.Vector3();
+      const camWorldDir = new THREE.Vector3();
+      targetCam.getWorldPosition(camWorldPos);
+      targetCam.getWorldDirection(camWorldDir);
+
+      sanityOverlayMesh.position.copy(camWorldPos).addScaledVector(camWorldDir, 0.3);
+      sanityOverlayMesh.quaternion.copy(targetCam.quaternion);
 
       if (sanityMaterial) {
         sanityMaterial.uniforms.uSanity.value = sanity / 100;
